@@ -228,7 +228,7 @@ API и worker подхватывают новую модель без перез
 `MIN_SCORE`, строгая схема ответа и детерминированная верификация цитат с инвариантами `needs_review`.
 Haystack добавил бы тяжёлую зависимость и собственные абстракции хранилищ/компонентов поверх этого
 кода, усложнил бы тестирование на stub-адаптерах и контроль границ. Порты позволяют подключить его позже
-отдельным адаптером (заготовка `app/adapters/rag_haystack/` пуста и не используется).
+отдельным адаптером.
 
 **Почему не SQLite / Chroma.** Нужны конкурентная запись API + worker, транзакции «ответ + аудит»,
 CHECK-ограничения, партиционирование аудита, русский FTS и векторы в одном запросе. SQLite не даёт
@@ -272,7 +272,6 @@ knowledgebase/
 │   │   │   │                  ensure_audit_partitions), health Redis
 │   │   │   ├── clickhouse/    ClickHouseAuditSink, DDL, health
 │   │   │   ├── extractors/    TextExtractor: plain (txt, md), docx (python-docx), pdf (pypdf); build_extractors
-│   │   │   ├── rag_haystack/, audit_kafka/   пустые заготовки (не используются)
 │   │   └── api/               documents, ask, ai, qa_runs, health, admin, audit (middleware), schemas, errors
 │   └── tests/
 │       ├── fixtures/          oncall.pdf (кириллица, 2 страницы) — генерируется scripts/make_samples.py
