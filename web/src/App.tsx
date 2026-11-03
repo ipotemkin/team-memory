@@ -18,37 +18,56 @@ export default function App() {
   const route = useRoute();
   // Документ открывается поверх вкладки, с которой перешли; закрытие возвращает назад.
   const lastTab = useRef<string>(hrefs.documents);
-  if (!route.documentId) lastTab.current = TABS.find((t) => t.id === route.tab)?.href ?? hrefs.documents;
-  const active: TabId = route.documentId && lastTab.current !== hrefs.documents
-    ? (TABS.find((t) => t.href === lastTab.current)?.id ?? "documents")
-    : route.tab;
+  if (!route.documentId)
+    lastTab.current =
+      TABS.find((t) => t.id === route.tab)?.href ?? hrefs.documents;
+  const active: TabId =
+    route.documentId && lastTab.current !== hrefs.documents
+      ? (TABS.find((t) => t.href === lastTab.current)?.id ?? "documents")
+      : route.tab;
   const closeDoc = useCallback(() => navigate(lastTab.current), []);
 
   return (
     <ToastProvider>
-      <div className="app">
-        <header className="top">
+      <header className="top">
+        <div className="top-inner">
           <h1>Team Memory</h1>
           <nav aria-label="Разделы">
             <ul className="tabs">
               {TABS.map((t) => (
                 <li key={t.id}>
-                  <a href={t.href} aria-current={active === t.id ? "page" : undefined} className={active === t.id ? "active" : ""}>
+                  <a
+                    href={t.href}
+                    aria-current={active === t.id ? "page" : undefined}
+                    className={active === t.id ? "active" : ""}
+                  >
                     {t.label}
                   </a>
                 </li>
               ))}
             </ul>
           </nav>
-        </header>
+        </div>
+      </header>
+      <div className="app">
         <main>
           {/* вкладки остаются смонтированными, чтобы не терять ответ/формы при переходах */}
-          <div hidden={active !== "documents"}><DocumentsTab /></div>
-          <div hidden={active !== "ask"}><AskTab /></div>
-          <div hidden={active !== "admin"}><AdminTab active={active === "admin"} /></div>
-          <div hidden={active !== "history"}><HistoryTab runId={route.runId} active={active === "history"} /></div>
+          <div hidden={active !== "documents"}>
+            <DocumentsTab />
+          </div>
+          <div hidden={active !== "ask"}>
+            <AskTab />
+          </div>
+          <div hidden={active !== "admin"}>
+            <AdminTab active={active === "admin"} />
+          </div>
+          <div hidden={active !== "history"}>
+            <HistoryTab runId={route.runId} active={active === "history"} />
+          </div>
         </main>
-        {route.documentId ? <DocumentView id={route.documentId} onClose={closeDoc} /> : null}
+        {route.documentId ? (
+          <DocumentView id={route.documentId} onClose={closeDoc} />
+        ) : null}
       </div>
     </ToastProvider>
   );

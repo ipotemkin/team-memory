@@ -86,12 +86,13 @@ export function HistoryTab({ runId, active }: { runId: string | null; active: bo
       ) : runs.length === 0 ? (
         <p className="muted">Записей нет.</p>
       ) : (
+        <div className="table-scroll">
         <table>
           <thead>
             <tr>
               <th scope="col">Время</th>
               <th scope="col">Вопрос</th>
-              <th scope="col">Проверка</th>
+              <th scope="col">Нужна проверка</th>
             </tr>
           </thead>
           <tbody>
@@ -116,6 +117,7 @@ export function HistoryTab({ runId, active }: { runId: string | null; active: bo
             ))}
           </tbody>
         </table>
+        </div>
       )}
       {runId ? (
         <RunCard

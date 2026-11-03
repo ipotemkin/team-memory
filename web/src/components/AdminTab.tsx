@@ -106,12 +106,12 @@ export function AdminTab({ active }: { active: boolean }) {
     return (
       <section className="stack">
         <h2>Администрирование</h2>
-        <form className="row" onSubmit={login}>
-          <label>
-            Админ-токен
-            <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
-          </label>
-          <button type="submit">Войти</button>
+        <form className="login-form" onSubmit={login}>
+          <label htmlFor="admin-token">Админ-токен</label>
+          <div className="login-row">
+            <input id="admin-token" type="password" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
+            <button type="submit">Войти</button>
+          </div>
         </form>
         <p className="muted">Токен хранится только в sessionStorage этой вкладки (ADMIN_TOKEN на сервере).</p>
       </section>

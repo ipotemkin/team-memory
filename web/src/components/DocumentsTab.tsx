@@ -112,7 +112,7 @@ export function DocumentsTab() {
   return (
     <div className="stack">
       <div className="grid2">
-        <form className="card" onSubmit={submit} noValidate aria-label="Добавить документ">
+        <form className="card form-col" onSubmit={submit} noValidate aria-label="Добавить документ">
           <h2>Добавить документ</h2>
           <label htmlFor="doc-title">Заголовок</label>
           <input
@@ -127,7 +127,7 @@ export function DocumentsTab() {
           <label htmlFor="doc-text">Текст</label>
           <textarea
             id="doc-text"
-            rows={6}
+            rows={3}
             value={text}
             onChange={(e) => setText(e.target.value)}
             aria-invalid={!!errors.text}
@@ -137,7 +137,7 @@ export function DocumentsTab() {
           {errors.text ? <p id="doc-text-err" className="field-error">{errors.text}</p> : null}
           <button type="submit" disabled={busy}>Добавить</button>
         </form>
-        <form className="card" onSubmit={upload} noValidate aria-label="Загрузить файл">
+        <form className="card form-col" onSubmit={upload} noValidate aria-label="Загрузить файл">
           <h2>Загрузить файл</h2>
           <label htmlFor="doc-file">Файл (.txt, .md, .docx, .pdf, до 20 МБ)</label>
           <input
@@ -172,6 +172,7 @@ export function DocumentsTab() {
         ) : docs.length === 0 ? (
           <p className="muted">Документов пока нет.</p>
         ) : (
+          <div className="table-scroll">
           <table>
             <thead>
               <tr>
@@ -194,6 +195,7 @@ export function DocumentsTab() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </div>
