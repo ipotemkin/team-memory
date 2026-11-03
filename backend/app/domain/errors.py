@@ -19,3 +19,11 @@ class LLMInvalidJSON(DomainError):
 
 class Conflict(DomainError):
     """Operation conflicts with the current state (e.g. activating a model that is not fully indexed)."""
+
+
+class UnsupportedFile(DomainError):
+    """Uploaded file type is not supported/allowed, or its content does not match the declared type."""
+
+
+class ExtractionFailed(DomainError):
+    """The file has the right type but no text could be extracted (corrupt file, scanned PDF, ...)."""

@@ -15,13 +15,6 @@ from app.services.documents import DocumentService
 
 router = APIRouter(prefix="/kb/documents", tags=["documents"])
 
-TEXT_TYPES = {
-    "text/plain": "text/plain",
-    "text/markdown": "text/markdown",
-    "text/x-markdown": "text/markdown",
-}
-EXT_TYPES = {".txt": "text/plain", ".md": "text/markdown", ".markdown": "text/markdown"}
-
 _BODY_DOC: dict[str, Any] = {
     "requestBody": {
         "required": True,
@@ -33,23 +26,17 @@ _BODY_DOC: dict[str, Any] = {
                     "required": ["file"],
                     "properties": {
                         "title": {"type": "string", "maxLength": 200},
-                        "file": {"type": "string", "format": "binary", "description": ".txt / .md, UTF-8"},
+                        "file": {
+                            "type": "string",
+                            "format": "binary",
+                            "description": ".txt / .md (UTF-8), .docx, .pdf (с текстовым слоем)",
+                        },
                     },
                 }
             },
         },
     }
 }
-
-
-def _mime(filename: str, content_type: str | None) -> str | None:
-    ct = (content_type or "").split(";")[0].strip().lower()
-    if ct in TEXT_TYPES:
-        return TEXT_TYPES[ct]
-    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext in EXT_TYPES and ct in ("", "application/octet-stream", "text/plain"):
-        return EXT_TYPES[ext]
-    return None
 
 
 @router.post(
@@ -95,17 +82,10 @@ async def _upload(request: Request, svc: DocumentService, s: Settings) -> Any:
     if len(data) > limit:
         raise ApiError(413, "file_too_large", f"max {s.MAX_UPLOAD_MB} MB")
     filename = file.filename or "file"
-    mime = _mime(filename, file.content_type)
-    if mime is None:
-        raise ApiError(415, "unsupported_media_type", "supported: text/plain (.txt), text/markdown (.md)")
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise ApiError(415, "unsupported_media_type", "text must be UTF-8") from None
     raw_title = form.get("title")
     title = raw_title if isinstance(raw_title, str) and raw_title.strip() else filename.rsplit(".", 1)[0]
-    DocumentIn(title=title, text=text)  # same limits as JSON (ValidationError -> 422)
-    return await svc.add_file(title, filename, data, mime, text)
+    # format detection, magic bytes and text extraction: TextExtractionService (415 / 422)
+    return await svc.add_file(title, filename, data, file.content_type)
 
 
 @router.get("", response_model=list[DocumentListItem], responses={422: {"model": ErrorOut}})

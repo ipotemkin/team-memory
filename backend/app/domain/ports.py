@@ -118,3 +118,32 @@ class EmbeddingModelRegistry(Protocol):
         ...
 
     async def ensure_index(self, name: str) -> None: ...
+
+
+class TextExtractor(Protocol):
+    """Extracts plain text from one uploaded file format (txt, md, docx, pdf, ...).
+
+    Adding a format = a new adapter + registration in composition.py (UPLOAD_FORMATS).
+    """
+
+    @property
+    def format(self) -> str:
+        """Short name used in UPLOAD_FORMATS, e.g. "pdf"."""
+        ...
+
+    @property
+    def mime_type(self) -> str:
+        """Canonical MIME type stored with the original."""
+        ...
+
+    def supports(self, extension: str, content_type: str) -> bool:
+        """``extension`` like ".pdf" (lowercase, may be ""), ``content_type`` without parameters."""
+        ...
+
+    def matches(self, data: bytes) -> bool:
+        """Magic-bytes check: does the content look like this format?"""
+        ...
+
+    def extract(self, data: bytes) -> str:
+        """Plain text (paragraphs separated by blank lines). Raises UnsupportedFile / ExtractionFailed."""
+        ...

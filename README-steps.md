@@ -653,3 +653,16 @@ make restore BACKUP=backups/20261104-010000 CONFIRM=yes   # стоп api/worker/
 - [ ] вкладка «Админ» работает, токен не переживает закрытие вкладки
 - [ ] `make backup` / `make restore CONFIRM=yes` восстанавливают документы и файлы
 - [ ] `make test lint typecheck web-test` зелёные
+
+## Импорт DOCX и PDF
+
+- Порт `TextExtractor` (`domain/ports.py`) и адаптеры в `adapters/extractors/`: plain (txt, md — UTF-8),
+  docx (python-docx: абзацы, заголовки, таблицы «ячейка | ячейка»), pdf (pypdf: постранично, страницы
+  через пустую строку; нет текстового слоя → 422 `extraction_failed`).
+- `TextExtractionService` выбирает адаптер по расширению + MIME, проверяет сигнатуру (`PK\x03\x04`, `%PDF-`),
+  парсит в `asyncio.to_thread`. Регистрация — в `composition.py` по `UPLOAD_FORMATS`; новый формат =
+  новый адаптер + строка в `ALL_EXTRACTORS`.
+- Текст извлекается при загрузке и хранится в `documents.text`; чанкинг, индексация, хранение оригинала
+  в MinIO и проверка цитат не менялись. import-linter: docx/pypdf/fpdf — только в адаптерах.
+- Тесты: `tests/unit/test_extractors.py`, `tests/contract/test_text_extractor_contract.py`,
+  `tests/api/test_upload_formats.py`, vitest для поля файла. Примеры: `scripts/make_samples.py`.

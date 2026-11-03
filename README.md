@@ -25,8 +25,9 @@
 
 **Team Memory** — «память команды»:
 
-- **Документы.** Добавляются JSON-ом `{title, text}` или загрузкой файла `.txt`/`.md` (UTF-8, до
-  `MAX_UPLOAD_MB`). Оригинал файла хранится в MinIO (S3), текст режется на фрагменты по абзацам
+- **Документы.** Добавляются JSON-ом `{title, text}` или загрузкой файла `.txt`/`.md` (UTF-8),
+  `.docx` (абзацы и таблицы) или `.pdf` (текстовый слой, без OCR) — до `MAX_UPLOAD_MB`; набор форматов
+  задаётся `UPLOAD_FORMATS`. Текст извлекается при загрузке адаптером порта `TextExtractor`. Оригинал файла хранится в MinIO (S3), текст режется на фрагменты по абзацам
   (`app/domain/chunking.py`, текст фрагментов — дословно из источника) и индексируется в фоне
   (Celery): полнотекстовый индекс Postgres (`russian`) + эмбеддинги в pgvector.
 - **Вопросы и ответы (Q&A) с цитатами.** `POST /kb/ask` находит релевантные фрагменты, передаёт их LLM
@@ -59,7 +60,7 @@ stub-модели (без сети и ключей).
 
 ### Как пользоваться приложением
 
-Веб-панель (http://localhost:5173) состоит из четырёх вкладок: **Документы**, **Вопросы**, **История** и **Админ**. Работа начинается с вкладки **Документы**: сюда добавляются регламенты, инструкции и другие тексты команды — вручную (название и текст) или загрузкой файла `.txt`/`.md`. После добавления документ индексируется в фоне; в списке виден его статус (`uploaded` → `indexing` → `ready`, при сбое — `failed` с текстом ошибки). Искать можно только по документам в статусе `ready`.
+Веб-панель (http://localhost:5173) состоит из четырёх вкладок: **Документы**, **Вопросы**, **История** и **Админ**. Работа начинается с вкладки **Документы**: сюда добавляются регламенты, инструкции и другие тексты команды — вручную (название и текст) или загрузкой файла `.txt`/`.md`/`.docx`/`.pdf` (у PDF должен быть текстовый слой: сканы без OCR отклоняются с понятной ошибкой). После добавления документ индексируется в фоне; в списке виден его статус (`uploaded` → `indexing` → `ready`, при сбое — `failed` с текстом ошибки). Искать можно только по документам в статусе `ready`.
 
 На вкладке **Вопросы** пользователь задаёт вопрос обычным языком. Приложение находит подходящие фрагменты в базе знаний, формирует ответ и показывает под ним дословные цитаты со ссылками на документы-источники. Если в базе нет данных для ответа или модель не уверена, вместо ответа выводится «Данных недостаточно…», а вопрос помечается для ручной проверки (`needs_review`) с указанием причины. Все заданные вопросы, ответы и источники сохраняются на вкладке **История**; там же можно отфильтровать вопросы, ожидающие ручной проверки.
 
@@ -212,6 +213,9 @@ API и worker подхватывают новую модель без перез
 | **httpx** — свой OpenAI-совместимый клиент | `adapters/openai_compat` | вместо SDK `openai`: одна лёгкая зависимость, явные таймауты/ретраи, тесты через `httpx.MockTransport`; работает с OpenAI через **ProxyAPI**, Ollama, vLLM |
 | **Celery + Redis** | `adapters/celery_queue` | фоновая индексация с ретраями и backoff, beat для обслуживания партиций, прогресс переиндексации |
 | **clickhouse-connect** | `adapters/clickhouse` | официальный HTTP-клиент ClickHouse; вызовы через `asyncio.to_thread` |
+| **python-docx** | `adapters/extractors/docx.py` | текст DOCX: абзацы, заголовки и ячейки таблиц в порядке документа; чистый Python поверх lxml |
+| **pypdf** | `adapters/extractors/pdf.py` | текстовый слой PDF постранично, без системных зависимостей (poppler не нужен); зашифрованные/битые файлы → 422 |
+| **fpdf2** (dev) | `scripts/make_samples.py` | генерация тестового PDF с кириллицей (шрифт DejaVu Sans) |
 | **prometheus-client** | `app/observability.py` | `/metrics`: счётчики и гистограмма длительности HTTP-запросов |
 | **React 18 + Vite 5 + TypeScript** | `web/` | быстрый dev-сервер, типизированный клиент API, без UI-библиотек |
 | **vitest** + Testing Library | `web/src/test` | тесты компонентов с мок-`fetch`, совместимы с Vite |
@@ -257,7 +261,7 @@ knowledgebase/
 │   │   ├── composition.py     composition root: выбор адаптеров по настройкам, Container
 │   │   ├── observability.py   JSON-логи, X-Request-ID, Prometheus-метрики
 │   │   ├── domain/            models, ports, errors, chunking, guardrails, prompts, health
-│   │   ├── services/          documents, indexing, ask, ai_answer, qa_runs, audit, admin, embedding, health
+│   │   ├── services/          documents, extraction, indexing, ask, ai_answer, qa_runs, audit, admin, embedding, health
 │   │   ├── adapters/
 │   │   │   ├── postgres/      ORM, репозитории, UoW, гибридный ретривер, реестр моделей, health
 │   │   │   ├── memory/        in-memory реализации всех портов (тесты, режим без БД)
@@ -267,9 +271,11 @@ knowledgebase/
 │   │   │   ├── celery_queue/  TaskQueue, worker (index_document, reindex_embedding_model, reindex_all,
 │   │   │   │                  ensure_audit_partitions), health Redis
 │   │   │   ├── clickhouse/    ClickHouseAuditSink, DDL, health
+│   │   │   ├── extractors/    TextExtractor: plain (txt, md), docx (python-docx), pdf (pypdf); build_extractors
 │   │   │   ├── rag_haystack/, audit_kafka/   пустые заготовки (не используются)
 │   │   └── api/               documents, ask, ai, qa_runs, health, admin, audit (middleware), schemas, errors
 │   └── tests/
+│       ├── fixtures/          oncall.pdf (кириллица, 2 страницы) — генерируется scripts/make_samples.py
 │       ├── unit/              домен и сервисы на memory/stub
 │       ├── contract/          одинаковые тесты портов для memory и Postgres/S3/ClickHouse
 │       ├── api/               HTTP-тесты через ASGI-клиент (memory)
@@ -278,9 +284,11 @@ knowledgebase/
 │       └── live/              реальный LLM-провайдер (маркер live, платно)
 ├── web/                       React + Vite + TS: src/api (клиент и типы), src/components (вкладки),
 │                              src/test (vitest), router.ts (hash-маршруты)
-├── tests_data/                kb_documents.jsonl (5 документов), kb_questions.jsonl (10 вопросов)
+├── tests_data/                kb_documents.jsonl (5 документов), kb_questions.jsonl (10 вопросов),
+│                              samples/oncall.docx, samples/oncall.pdf — примеры для ручной загрузки
 ├── scripts/
 │   ├── kb.py                  seed / eval / acceptance против запущенного API (stdlib)
+│   ├── make_samples.py        генерация примеров DOCX/PDF (cd backend && uv run python ../scripts/make_samples.py)
 │   ├── smoke.sh               smoke-тест 3 сценариев ТЗ
 │   ├── backup.sh, restore.sh  бэкап/восстановление Postgres + MinIO
 └── docker/
@@ -420,6 +428,7 @@ bge-m3 имеет размерность 1024 (а не 1536) — на сущес
 | `AUDIT_PARTITIONS_MONTHS` | `2` | на сколько месяцев вперёд создавать партиции аудита |
 | `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | разрешённые origin'ы |
 | `MAX_UPLOAD_MB` | `20` | лимит загружаемого файла |
+| `UPLOAD_FORMATS` | `txt,md,docx,pdf` | разрешённые форматы загрузки (неизвестное имя → ошибка старта) |
 | `AUDIT_MAX_BODY_KB` | `10` | сколько тела запроса/ответа сохранять в аудите ошибок |
 | `DOWNLOAD_URL_TTL_S` | `900` | срок жизни presigned-ссылки |
 | `VITE_API_URL` | `http://localhost:8000` | адрес API для браузера (сервис `web`) |
@@ -487,6 +496,15 @@ curl -s -X POST localhost:8000/kb/documents -H 'Content-Type: application/json' 
 ```
 
 Загрузить файл: `curl -s -X POST localhost:8000/kb/documents -F title=FAQ -F file=@faq.md`.
+PDF или DOCX — так же (тип можно указать явно):
+
+```bash
+curl -s -X POST localhost:8000/kb/documents -F title='Регламент дежурств' \
+  -F 'file=@tests_data/samples/oncall.pdf;type=application/pdf'
+# {"status":"ok","document_id":"6","document_status":"indexing"}
+# скан без текстового слоя → 422 {"error":"extraction_failed","detail":"PDF has no text layer (scanned PDF?); OCR is not supported"}
+# .rtf или PDF, который на самом деле zip → 415 {"error":"unsupported_media_type",...}
+```
 
 **Список документов:**
 
@@ -693,7 +711,7 @@ make smoke                    # 3 сценария ТЗ
 ### 8.4. Чек-лист в браузере (http://localhost:5173)
 
 1. **Документы**: пустая форма → ошибки под полями; добавить документ → тост и статус «индексируется»
-   сменяется на «готов» без перезагрузки; загрузить `.md` (а `.pdf` → ошибка у поля); открыть документ —
+   сменяется на «готов» без перезагрузки; загрузить `.md`, `tests_data/samples/oncall.docx` и `oncall.pdf` (а `.exe` → ошибка у поля); открыть документ —
    первые 50 строк, «Показать всё», «Скачать оригинал» для файла; ссылка `#/documents/{id}` открывает карточку.
 2. **Вопросы**: вопрос по документу (Ctrl/Cmd+Enter) → ответ и источники с цитатами, ссылка «Документ #N»
    открывает карточку; вопрос вне базы → бейдж «требует проверки».
@@ -754,6 +772,7 @@ S3_PUBLIC_ENDPOINT_URL=http://localhost:9100   # presigned download links reacha
 # Stage 4 (HTTP API)
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 MAX_UPLOAD_MB=20
+UPLOAD_FORMATS=txt,md,docx,pdf   # enabled upload formats (adapters: txt, md, docx, pdf)
 AUDIT_MAX_BODY_KB=10
 DOWNLOAD_URL_TTL_S=900
 # Integration tests (set automatically by `make test-integration` inside the api-test container)

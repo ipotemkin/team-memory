@@ -73,9 +73,9 @@ describe("Сценарий 1: документы", () => {
     const user = userEvent.setup({ applyAccept: false });
     render(<App />);
     const input = await screen.findByLabelText(/Файл/);
-    await user.upload(input, new File(["%PDF"], "a.pdf", { type: "application/pdf" }));
+    await user.upload(input, new File(["MZ"], "a.exe", { type: "application/octet-stream" }));
     await user.click(screen.getByRole("button", { name: "Загрузить" }));
-    expect(screen.getByText("Поддерживаются только .txt и .md")).toBeInTheDocument();
+    expect(screen.getByText("Поддерживаются только .txt, .md, .docx и .pdf")).toBeInTheDocument();
 
     await user.upload(input, new File(["# hi"], "notes.md", { type: "text/markdown" }));
     await user.click(screen.getByRole("button", { name: "Загрузить" }));
@@ -83,6 +83,25 @@ describe("Сценарий 1: документы", () => {
     const fd = calls.find((c) => c.init?.body instanceof FormData)?.init?.body as FormData;
     expect((fd.get("file") as File).name).toBe("notes.md");
     expect(await screen.findByText("Документ #7 добавлен")).toBeInTheDocument();
+  });
+
+  it("файловый input принимает .txt/.md/.docx/.pdf, показывает подсказку и отправляет PDF", async () => {
+    const { calls } = mockFetch(
+      route("GET", "/kb/documents", []),
+      route("POST", "/kb/documents", { status: "ok", document_id: "8", document_status: "ready" }),
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    const input = await screen.findByLabelText(/Файл/);
+    expect(input).toHaveAttribute("accept", ".txt,.md,.docx,.pdf");
+    expect(screen.getByText(/из PDF — текстовый слой/)).toBeInTheDocument();
+    expect(input.getAttribute("aria-describedby")).toContain("doc-file-hint");
+    await user.upload(input, new File(["%PDF-1.7"], "Регламент.PDF", { type: "application/pdf" }));
+    await user.click(screen.getByRole("button", { name: "Загрузить" }));
+    await waitFor(() => expect(calls.some((c) => c.init?.body instanceof FormData)).toBe(true));
+    const fd = calls.find((c) => c.init?.body instanceof FormData)?.init?.body as FormData;
+    expect((fd.get("file") as File).name).toBe("Регламент.PDF");
+    expect(await screen.findByText("Документ #8 добавлен")).toBeInTheDocument();
   });
 
   it("deep link #/documents/{id} открывает документ: первые строки, показать всё, скачать", async () => {

@@ -13,6 +13,7 @@ from app.domain.errors import NotFound
 from app.domain.models import Document, DocumentStatus, NewDocument, Page, Snippet
 from app.domain.ports import FileStorage, TaskQueue, UnitOfWork
 from app.services.audit import AuditTimer
+from app.services.extraction import TextExtractionService
 from app.services.indexing import INDEX_TASK
 
 ACTION = "POST /kb/documents"
@@ -24,18 +25,25 @@ class DocumentService:
         uow_factory: Callable[[], UnitOfWork],
         storage: FileStorage | None = None,
         queue: TaskQueue | None = None,
+        extraction: TextExtractionService | None = None,
     ) -> None:
         self._uow = uow_factory
         self._storage = storage
         self._queue = queue
+        self._extraction = extraction
 
     async def add(self, title: str, text: str) -> Document:
         new = NewDocument(title=title, text=text)  # validates limits
         return await self._add(new, {"title": new.title, "text_len": len(new.text)})
 
-    async def add_file(self, title: str, filename: str, data: bytes, mime: str, text: str) -> Document:
-        """Store the original in FileStorage, then index the extracted text."""
-        new = NewDocument(title=title, text=text)  # validate before touching storage
+    async def add_file(self, title: str, filename: str, data: bytes, content_type: str | None) -> Document:
+        """Extract text (txt/md/docx/pdf, see TextExtractionService), store the original in FileStorage,
+        then index the extracted text like any other document (snippets are verbatim from it)."""
+        if self._extraction is None:
+            raise RuntimeError("TextExtractionService is not configured")
+        extracted = await self._extraction.extract(filename, content_type, data)
+        mime = extracted.mime_type
+        new = NewDocument(title=title, text=extracted.text)  # validate before touching storage
         if self._storage is None:
             raise RuntimeError("FileStorage is not configured")
         safe = PurePosixPath(filename or "file").name or "file"
@@ -51,7 +59,10 @@ class DocumentService:
             }
         )
         try:
-            return await self._add(new, {"title": new.title, "filename": safe, "size_bytes": len(data)})
+            return await self._add(
+                new,
+                {"title": new.title, "filename": safe, "size_bytes": len(data), "format": extracted.format},
+            )
         except Exception:
             await self._storage.delete(key)
             raise

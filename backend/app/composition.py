@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from app.adapters.celery_queue.health import RedisProbe
 from app.adapters.celery_queue.queue import CeleryTaskQueue
 from app.adapters.clickhouse import ClickHouseAuditSink, ClickHouseProbe
+from app.adapters.extractors import build_extractors
 from app.adapters.memory import InlineTaskQueue, MemoryAuditSink, MemoryFileStorage
 from app.adapters.memory import build as build_memory
 from app.adapters.openai_compat import OpenAICompatChatLLM, OpenAICompatClient, OpenAICompatEmbedder
@@ -38,6 +39,7 @@ from app.services.ask import AskService
 from app.services.audit import AuditService
 from app.services.documents import DocumentService
 from app.services.embedding import ActiveEmbedder, EmbedderFactory
+from app.services.extraction import TextExtractionService
 from app.services.health import EmbedderProbe, HealthService, StaticProbe
 from app.services.indexing import INDEX_TASK, IndexingService
 from app.services.qa_runs import QaRunService
@@ -77,8 +79,11 @@ class Container:
     embedder_factory: EmbedderFactory | None = None  # builds an Embedder for a registered model
     embedder_provider: str = "stub"
     health_probes: list[HealthProbe] = field(default_factory=list)  # extra /admin/health probes
+    extraction: TextExtractionService | None = None  # upload formats; default from UPLOAD_FORMATS
 
     def __post_init__(self) -> None:
+        if self.extraction is None:
+            self.extraction = TextExtractionService(build_extractors(self.settings.upload_formats))
         self._active: ActiveEmbedder | None = None
         if self.registry is not None:
             self._active = ActiveEmbedder(self.embedder, self.registry, self.embedder_factory or stub_factory)
@@ -119,7 +124,7 @@ class Container:
         return HealthService([*self.health_probes, EmbedderProbe(self.query_embedder())], timeout=10.0)
 
     def document_service(self) -> DocumentService:
-        return DocumentService(self.uow_factory, self.storage, self.queue)
+        return DocumentService(self.uow_factory, self.storage, self.queue, self.extraction)
 
     def indexing_service(self) -> IndexingService:
         return IndexingService(self.uow_factory, self.query_embedder())

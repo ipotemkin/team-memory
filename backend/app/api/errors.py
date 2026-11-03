@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.domain.errors import Conflict, LLMError, LLMInvalidJSON, NotFound
+from app.domain.errors import Conflict, ExtractionFailed, LLMError, LLMInvalidJSON, NotFound, UnsupportedFile
 
 
 class ApiError(Exception):
@@ -54,6 +54,14 @@ def install(app: FastAPI) -> None:
     @app.exception_handler(NotFound)
     async def _nf(_: Request, exc: NotFound) -> JSONResponse:
         return error_response(404, "not_found", str(exc))
+
+    @app.exception_handler(UnsupportedFile)
+    async def _unsupported(_: Request, exc: UnsupportedFile) -> JSONResponse:
+        return error_response(415, "unsupported_media_type", str(exc))
+
+    @app.exception_handler(ExtractionFailed)
+    async def _extraction(_: Request, exc: ExtractionFailed) -> JSONResponse:
+        return error_response(422, "extraction_failed", str(exc))
 
     @app.exception_handler(Conflict)
     async def _conflict(_: Request, exc: Conflict) -> JSONResponse:

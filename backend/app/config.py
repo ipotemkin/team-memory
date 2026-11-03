@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     AUDIT_MAX_BODY_KB: int = 10
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     DOWNLOAD_URL_TTL_S: int = 900
+    UPLOAD_FORMATS: str = "txt,md,docx,pdf"  # enabled upload formats (TextExtractor adapters)
 
     # Stage 8: operations
     ADMIN_TOKEN: str = Field(default="", repr=False)  # empty -> /admin disabled (404)
@@ -98,6 +99,10 @@ class Settings(BaseSettings):
     @property
     def audit_to_clickhouse(self) -> bool:
         return self.AUDIT_BACKEND in ("clickhouse", "both")
+
+    @property
+    def upload_formats(self) -> list[str]:
+        return [f.strip().lower().lstrip(".") for f in self.UPLOAD_FORMATS.split(",") if f.strip()]
 
     @property
     def audit_sinks(self) -> list[str]:

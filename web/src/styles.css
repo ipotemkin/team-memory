@@ -40,3 +40,9 @@ tr.clickable { cursor:pointer; } tr.clickable:hover { background:#f0f4fc; }
 .toast.error { background:var(--err); } .toast.info { background:#344054; }
 .toast button { margin:0; background:transparent; border:none; padding:0 4px; font-size:1.1rem; }
 .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+
+.hint {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.85em;
+  color: #666;
+}

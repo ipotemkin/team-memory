@@ -22,7 +22,7 @@ export function validateDocument(title: string, text: string): Errors {
 export function validateFile(file: File | null): string | undefined {
   if (!file) return "Выберите файл";
   const name = file.name.toLowerCase();
-  if (!LIMITS.uploadExtensions.some((ext) => name.endsWith(ext))) return "Поддерживаются только .txt и .md";
+  if (!LIMITS.uploadExtensions.some((ext) => name.endsWith(ext))) return "Поддерживаются только .txt, .md, .docx и .pdf";
   if (file.size > LIMITS.uploadMaxBytes) return "Файл больше 20 МБ";
   if (file.size === 0) return "Файл пустой";
   return undefined;
@@ -139,16 +139,20 @@ export function DocumentsTab() {
         </form>
         <form className="card" onSubmit={upload} noValidate aria-label="Загрузить файл">
           <h2>Загрузить файл</h2>
-          <label htmlFor="doc-file">Файл (.txt, .md, до 20 МБ)</label>
+          <label htmlFor="doc-file">Файл (.txt, .md, .docx, .pdf, до 20 МБ)</label>
           <input
             id="doc-file"
             type="file"
-            accept=".txt,.md,text/plain,text/markdown"
+            accept={LIMITS.uploadExtensions.join(",")}
             ref={fileInput}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             aria-invalid={!!fileError}
-            aria-describedby={fileError ? "doc-file-err" : undefined}
+            aria-describedby={fileError ? "doc-file-err doc-file-hint" : "doc-file-hint"}
           />
+          <p id="doc-file-hint" className="hint">
+            Текст и Markdown — в UTF-8; из DOCX берутся абзацы и таблицы, из PDF — текстовый слой
+            (сканы без OCR не поддерживаются).
+          </p>
           <label htmlFor="doc-file-title">Заголовок (необязательно)</label>
           <input id="doc-file-title" value={fileTitle} onChange={(e) => setFileTitle(e.target.value)} />
           {fileError ? <p id="doc-file-err" className="field-error">{fileError}</p> : null}

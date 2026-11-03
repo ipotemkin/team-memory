@@ -144,7 +144,9 @@ async def test_upload_txt_title_from_filename(api: Api) -> None:
 
 
 async def test_upload_unsupported_415(api: Api) -> None:
-    r = await api.client.post("/kb/documents", files={"file": ("a.pdf", b"%PDF", "application/pdf")})
+    r = await api.client.post(
+        "/kb/documents", files={"file": ("a.exe", b"MZ\x90", "application/octet-stream")}
+    )
     assert r.status_code == 415 and r.json()["error"] == "unsupported_media_type"
     inp = api.audit[-1]["input"]
     assert isinstance(inp, dict) and inp["content_type"] == "multipart/form-data"

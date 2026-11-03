@@ -74,7 +74,7 @@ export const LIMITS = {
   questionMin: 3,
   questionMax: 2000,
   uploadMaxBytes: 20 * 1024 * 1024,
-  uploadExtensions: [".txt", ".md"],
+  uploadExtensions: [".txt", ".md", ".docx", ".pdf"],
 } as const;
 
 export interface EmbeddingModel {
