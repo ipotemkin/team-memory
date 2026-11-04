@@ -200,7 +200,7 @@ export function AdminTab({ active }: { active: boolean }) {
       ) : <p aria-busy="true">Загрузка…</p>}
 
       <h3>Зарегистрировать модель</h3>
-      <form className="row" onSubmit={register} aria-label="Новая модель">
+      <form className="model-form" onSubmit={register} aria-label="Новая модель">
         <label>
           Провайдер
           <select value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })}>

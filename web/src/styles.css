@@ -77,3 +77,9 @@ tr.clickable { cursor:pointer; } tr.clickable:hover { background:#f0f4fc; }
 .form-col textarea { flex: 1; min-height: 72px; resize: vertical; }
 .form-col button[type=submit] { align-self: flex-start; margin-top: auto; }
 .form-col .small + button[type=submit], .form-col .field-error + button[type=submit] { margin-top: 8px; }
+
+/* Форма регистрации модели: подписи над полями, поля и кнопка выровнены по нижнему краю и одной высоты */
+.model-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
+.model-form label { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.model-form select, .model-form input, .model-form button { height: 36px; box-sizing: border-box; margin: 0; }
+.model-form input[type="number"] { width: 110px; }
