@@ -1,9 +1,9 @@
-"""Stage-7 acceptance on stubs (memory backend, deterministic): the 4 criteria on tests_data/.
+"""Приёмка этапа 7 на заглушках (memory-бэкенд, детерминированно): 4 критерия на tests_data/.
 
-1. 5 documents are added via API and listed (ready, paragraph chunking).
-2. 7 answerable questions -> needs_review=false, sources from the expected document, verbatim quotes.
-3. 3 out-of-base questions -> "Данных недостаточно…", needs_review=true, no sources, reason in qa_runs.
-4. Every command is written to audit_runs (documents, ask, ai), negative runs carry the review reason.
+1. 5 документов добавляются через API и видны в списке (ready, нарезка по абзацам).
+2. 7 вопросов с ответом → needs_review=false, источники из ожидаемого документа, дословные цитаты.
+3. 3 вопроса вне базы → «Данных недостаточно…», needs_review=true, без источников, причина в qa_runs.
+4. Каждая команда пишется в audit_runs (documents, ask, ai), у отрицательных — причина ревью.
 """
 
 from typing import Any

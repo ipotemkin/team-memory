@@ -1,3 +1,5 @@
+"""Health-сервис: live, ok и degraded при недоступных зависимостях."""
+
 from fastapi.testclient import TestClient
 
 from app.domain.health import ComponentStatus

@@ -1,4 +1,10 @@
-"""Composition root: the ONLY place where adapters are wired to ports."""
+"""Composition root: ЕДИНСТВЕННОЕ место, где адаптеры подключаются к портам.
+
+По настройкам (DB_BACKEND, STORAGE_BACKEND, QUEUE_BACKEND, LLM_PROVIDER, EMBEDDINGS_PROVIDER,
+AUDIT_BACKEND...) выбираются реализации портов и собирается ``Container``, из которого API (main.py,
+api/deps.py) и Celery-воркер получают готовые сервисы. Остальные модули адаптеры не импортируют —
+это проверяет import-linter.
+"""
 
 import logging
 from collections.abc import Awaitable, Callable
@@ -46,6 +52,7 @@ from app.services.qa_runs import QaRunService
 
 
 def infra_probes(s: Settings) -> list[HealthProbe]:
+    """Пробы инфраструктуры для публичного /health: Postgres, S3/MinIO, Redis."""
     return [
         PostgresProbe(s.DB_URL),
         S3Probe(s.S3_ENDPOINT_URL, s.S3_ACCESS_KEY, s.S3_SECRET_KEY, s.S3_BUCKET, s.S3_REGION),
@@ -54,6 +61,7 @@ def infra_probes(s: Settings) -> list[HealthProbe]:
 
 
 def build_health_service(s: Settings) -> HealthService:
+    """HealthService для /health (только инфраструктура, без внешних LLM)."""
     return HealthService(infra_probes(s))
 
 
@@ -63,6 +71,13 @@ Job = Callable[[], Awaitable[Any]]
 
 @dataclass
 class Container:
+    """Контейнер зависимостей: готовые адаптеры + фабрики сервисов.
+
+    Сервисы создаются на каждый вызов (они лёгкие, без состояния); общее состояние — в адаптерах.
+    При наличии реестра моделей поиск и индексация используют ``ActiveEmbedder`` (активная модель
+    реестра), а не модель из настроек напрямую.
+    """
+
     uow_factory: Callable[[], UnitOfWork]
     retriever: Retriever
     storage: FileStorage
@@ -73,13 +88,13 @@ class Container:
     settings: Settings = field(default_factory=Settings)
 
     closers: list[Job] = field(default_factory=list)
-    startup: list[Job] = field(default_factory=list)  # e.g. register embedding model + HNSW index
-    maintenance: dict[str, Job] = field(default_factory=dict)  # periodic jobs (Celery beat)
-    registry: EmbeddingModelRegistry | None = None  # embedding-model registry (admin, blue/green)
-    embedder_factory: EmbedderFactory | None = None  # builds an Embedder for a registered model
+    startup: list[Job] = field(default_factory=list)  # например, регистрация модели эмбеддингов + HNSW-индекс
+    maintenance: dict[str, Job] = field(default_factory=dict)  # периодические задачи (Celery beat)
+    registry: EmbeddingModelRegistry | None = None  # реестр моделей эмбеддингов (админка, blue/green)
+    embedder_factory: EmbedderFactory | None = None  # создаёт Embedder для зарегистрированной модели
     embedder_provider: str = "stub"
-    health_probes: list[HealthProbe] = field(default_factory=list)  # extra /admin/health probes
-    extraction: TextExtractionService | None = None  # upload formats; default from UPLOAD_FORMATS
+    health_probes: list[HealthProbe] = field(default_factory=list)  # дополнительные пробы /admin/health
+    extraction: TextExtractionService | None = None  # форматы загрузки; по умолчанию из UPLOAD_FORMATS
 
     def __post_init__(self) -> None:
         if self.extraction is None:
@@ -87,24 +102,31 @@ class Container:
         self._active: ActiveEmbedder | None = None
         if self.registry is not None:
             self._active = ActiveEmbedder(self.embedder, self.registry, self.embedder_factory or stub_factory)
-        if isinstance(self.queue, InlineTaskQueue):  # tests / QUEUE_BACKEND=inline: index synchronously
+        if isinstance(self.queue, InlineTaskQueue):  # тесты / QUEUE_BACKEND=inline: индексация синхронно
             self.queue.register(INDEX_TASK, self._index_inline)
             self.queue.register(REINDEX_MODEL_TASK, self._reindex_inline)
 
     async def _index_inline(self, document_id: int) -> None:
+        """Обработчик INDEX_TASK для inline-очереди."""
         await self.indexing_service().index(document_id)
 
     async def _reindex_inline(self, name: str) -> None:
+        """Обработчик REINDEX_MODEL_TASK для inline-очереди; ошибка уже сохранена в реестре."""
         try:
             await self.admin_service().run_reindex_task(name)
-        except Exception:  # noqa: BLE001 - like a background task: failure is persisted in the registry
+        except Exception:  # noqa: BLE001 - как фоновая задача: ошибка сохранена в реестре
             logging.getLogger("app.admin").warning("inline reindex of %s failed", name)
 
     def query_embedder(self) -> Embedder:
-        """The embedder of the registry's active model (falls back to the configured one)."""
+        """Эмбеддер активной модели реестра (если реестра нет — модель из настроек)."""
         return self._active if self._active is not None else self.embedder
 
     def admin_service(self) -> AdminService:
+        """AdminService (реестр моделей, blue/green).
+
+        Raises:
+            RuntimeError: реестр не настроен (API отвечает 503).
+        """
         if self.registry is None or self._active is None:
             raise RuntimeError("embedding-model registry is not configured")
         active = self._active
@@ -121,32 +143,40 @@ class Container:
         )
 
     def admin_health_service(self) -> HealthService:
+        """HealthService для /admin/health: все пробы + эмбеддер активной модели (таймаут 10 с)."""
         return HealthService([*self.health_probes, EmbedderProbe(self.query_embedder())], timeout=10.0)
 
     def document_service(self) -> DocumentService:
+        """Сервис документов."""
         return DocumentService(self.uow_factory, self.storage, self.queue, self.extraction)
 
     def indexing_service(self) -> IndexingService:
+        """Сервис индексации (эмбеддинги активной модели)."""
         return IndexingService(self.uow_factory, self.query_embedder())
 
     def qa_run_service(self) -> QaRunService:
+        """Сервис истории вопросов и ответов."""
         return QaRunService(self.uow_factory)
 
     def audit_service(self) -> AuditService:
+        """Сервис аудита (транзакционный sink в UoW + дополнительные sink'и)."""
         return AuditService(self.uow_factory, self.extra_audit_sinks)
 
     async def run_startup(self) -> None:
+        """Выполняет стартовые задачи; ошибка любой из них логируется и не мешает запуску."""
         for job in self.startup:
             try:
                 await job()
-            except Exception:  # startup helpers must not prevent the API from serving
+            except Exception:  # стартовые задачи не должны мешать API работать
                 log.exception("startup job failed")
 
     async def aclose(self) -> None:
+        """Закрывает клиенты и пулы соединений."""
         for close in self.closers:
             await close()
 
     def ask_service(self) -> AskService:
+        """RAG-сервис /kb/ask (TOP_K, MIN_SCORE из настроек)."""
         return AskService(
             self.uow_factory,
             self.retriever,
@@ -158,20 +188,29 @@ class Container:
         )
 
     def ai_answer_service(self) -> AiAnswerService:
+        """Сервис /ai/answer_with_sources."""
         return AiAnswerService(self.uow_factory, self.chat, self.extra_audit_sinks)
 
 
 def stub_factory(info: EmbeddingModelInfo) -> Embedder:
+    """Фабрика эмбеддеров по умолчанию: только провайдер stub.
+
+    Raises:
+        NotImplementedError: провайдер не stub.
+    """
     if info.provider != "stub":
         raise NotImplementedError(f"embedding provider {info.provider!r} is not configured")
     return StubEmbedder(dim=info.dim, model_name=info.name)
 
 
 def _unknown(kind: str, value: str) -> NotImplementedError:
+    """Ошибка конфигурации: значение настройки без реализации адаптера."""
     return NotImplementedError(f"{kind}={value!r} adapter is not implemented")
 
 
 class _Db(Protocol):
+    """Общий интерфейс бэкендов БД (memory и Postgres): UoW, retriever, реестр моделей."""
+
     @property
     def retriever(self) -> Retriever: ...
 
@@ -184,6 +223,11 @@ class _Db(Protocol):
 
 
 def _db(s: Settings) -> _Db:
+    """Бэкенд БД по DB_BACKEND.
+
+    Raises:
+        NotImplementedError: неизвестное значение.
+    """
     if s.DB_BACKEND == "memory":
         return build_memory()
     if s.DB_BACKEND in ("postgres", "postgres_sqlalchemy"):
@@ -192,6 +236,7 @@ def _db(s: Settings) -> _Db:
 
 
 def _storage(s: Settings) -> FileStorage:
+    """Хранилище оригиналов файлов по STORAGE_BACKEND (memory или S3/MinIO)."""
     if s.STORAGE_BACKEND == "memory":
         return MemoryFileStorage()
     return S3FileStorage(
@@ -205,6 +250,7 @@ def _storage(s: Settings) -> FileStorage:
 
 
 def _queue(s: Settings) -> TaskQueue:
+    """Очередь задач по QUEUE_BACKEND; Celery импортируется лениво (воркер тянет настройки при импорте)."""
     if s.QUEUE_BACKEND in ("memory", "inline"):
         return InlineTaskQueue()
     from app.adapters.celery_queue.worker import celery_app
@@ -216,7 +262,10 @@ OPENAI_PROVIDERS = ("openai_compat", "openai", "ollama")
 
 
 class _Clients:
-    """Lazily created OpenAI-compatible clients (LLM and embeddings may point at different servers)."""
+    """Лениво создаваемые OpenAI-совместимые клиенты (LLM и эмбеддинги могут смотреть на разные серверы).
+
+    Если адрес и ключ совпадают, LLM и эмбеддинги делят один клиент (один пул соединений).
+    """
 
     def __init__(self, s: Settings) -> None:
         self._s = s
@@ -224,9 +273,11 @@ class _Clients:
         self._emb: OpenAICompatClient | None = None
 
     def _new(self, url: str, key: str) -> OpenAICompatClient:
+        """Новый клиент с таймаутом и ретраями из настроек."""
         return OpenAICompatClient(url, key, self._s.OPENAI_TIMEOUT_S, self._s.OPENAI_MAX_RETRIES)
 
     def llm(self) -> OpenAICompatClient:
+        """Клиент для ChatLLM (LLM_BASE_URL/LLM_API_KEY, по умолчанию OPENAI_*)."""
         if self._llm is None:
             s = self._s
             if self._emb is not None and (s.llm_base_url, s.llm_api_key) == (
@@ -239,6 +290,7 @@ class _Clients:
         return self._llm
 
     def embed(self) -> OpenAICompatClient:
+        """Клиент для эмбеддингов (EMBED_BASE_URL/EMBED_API_KEY, по умолчанию OPENAI_*)."""
         if self._emb is None:
             s = self._s
             if self._llm is not None and (s.llm_base_url, s.llm_api_key) == (
@@ -251,11 +303,13 @@ class _Clients:
         return self._emb
 
     async def aclose(self) -> None:
+        """Закрывает клиенты; общий клиент закрывается один раз."""
         for c in {id(c): c for c in (self._llm, self._emb) if c is not None}.values():
             await c.aclose()
 
 
 def _clickhouse(s: Settings) -> ClickHouseAuditSink:
+    """Приёмник аудита ClickHouse по настройкам CLICKHOUSE_*."""
     return ClickHouseAuditSink(
         s.CLICKHOUSE_HOST,
         s.CLICKHOUSE_PORT,
@@ -268,6 +322,11 @@ def _clickhouse(s: Settings) -> ClickHouseAuditSink:
 
 
 def build_container(s: Settings) -> Container:
+    """Собирает Container по настройкам.
+
+    Raises:
+        NotImplementedError: значение настройки без реализации адаптера.
+    """
     db = _db(s)
     clients = _Clients(s)
     closers: list[Job] = [clients.aclose]
@@ -301,6 +360,7 @@ def build_container(s: Settings) -> Container:
     else:
         raise _unknown("LLM_PROVIDER", s.LLM_PROVIDER)
 
+    # Эмбеддер для модели из реестра (blue/green может переключить провайдера/модель).
     def embedder_factory(info: EmbeddingModelInfo) -> Embedder:
         if info.provider in OPENAI_PROVIDERS:
             return OpenAICompatEmbedder(clients.embed(), info.name, info.dim, s.EMBED_BATCH_SIZE)
@@ -310,7 +370,7 @@ def build_container(s: Settings) -> Container:
     for sink in s.audit_sinks:
         if sink == "memory":
             extra.append(MemoryAuditSink())
-        elif sink not in ("db", "postgres"):  # transactional sink lives inside the UoW
+        elif sink not in ("db", "postgres"):  # транзакционный sink живёт внутри UoW
             raise _unknown("AUDIT_SINKS", sink)
 
     startup: list[Job] = []
@@ -325,7 +385,7 @@ def build_container(s: Settings) -> Container:
         closers.append(ch.aclose)
 
     async def _reindex_all() -> int:
-        """Re-enqueue indexing of every document (after switching EMBEDDINGS_MODEL)."""
+        """Ставит в очередь переиндексацию всех документов (после смены EMBEDDINGS_MODEL), пачками по 200."""
         n, offset = 0, 0
         while True:
             async with db.uow_factory() as uow:
@@ -337,6 +397,7 @@ def build_container(s: Settings) -> Container:
             if len(batch) < 200:
                 return n
 
+    # Только для Postgres: регистрация модели из настроек (первой стартовой задачей) и партиции аудита.
     if isinstance(db, PostgresBackend):
         engine = db.engine
         provider = s.EMBEDDINGS_PROVIDER

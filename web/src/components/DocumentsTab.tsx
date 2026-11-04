@@ -1,3 +1,4 @@
+// Вкладка «Документы»: добавление текстом и загрузкой файла, список с автообновлением статусов индексации.
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ApiError, api, errorMessage } from "../api/client";
 import { LIMITS, type DocumentListItem } from "../api/types";
@@ -6,10 +7,12 @@ import { hrefs } from "../router";
 import { StatusBadge } from "./Badges";
 import { useToast } from "./Toasts";
 
+/** Период опроса списка, пока есть документы в статусе indexing. */
 export const POLL_MS = 2000;
 
 type Errors = Partial<Record<"title" | "text" | "file", string>>;
 
+/** Клиентская проверка формы документа (лимиты как на сервере). */
 export function validateDocument(title: string, text: string): Errors {
   const e: Errors = {};
   if (!title.trim()) e.title = "Введите заголовок";
@@ -19,6 +22,7 @@ export function validateDocument(title: string, text: string): Errors {
   return e;
 }
 
+/** Клиентская проверка файла: расширение, размер, пустой файл. Формат по содержимому проверяет сервер. */
 export function validateFile(file: File | null): string | undefined {
   if (!file) return "Выберите файл";
   const name = file.name.toLowerCase();
@@ -28,6 +32,7 @@ export function validateFile(file: File | null): string | undefined {
   return undefined;
 }
 
+/** Формы добавления и таблица документов. */
 export function DocumentsTab() {
   const toast = useToast();
   const [docs, setDocs] = useState<DocumentListItem[] | null>(null);
@@ -52,6 +57,7 @@ export function DocumentsTab() {
     void load();
   }, [load]);
 
+  // Автообновление: опрашиваем список, пока хоть один документ индексируется в фоне.
   const indexing = docs?.some((d) => d.status === "indexing") ?? false;
   useEffect(() => {
     if (!indexing) return;
@@ -96,12 +102,14 @@ export function DocumentsTab() {
       const r = await api.uploadDocument(file, fileTitle.trim() || undefined);
       setFile(null);
       setFileTitle("");
+      // Сбрасываем input type=file, иначе тот же файл нельзя выбрать повторно.
       if (fileInput.current) fileInput.current.value = "";
       created(r.document_id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 422) {
         const fe = e.fieldErrors();
         setFileError(Object.values(fe).join("; ") || e.message);
+      // 413/415 (слишком большой / неподдерживаемый файл) показываем у поля, а не уведомлением.
       } else if (e instanceof ApiError && (e.status === 413 || e.status === 415)) setFileError(e.message);
       else toast(errorMessage(e));
     } finally {

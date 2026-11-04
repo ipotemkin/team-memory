@@ -1,3 +1,5 @@
+"""Фикстуры API-тестов: приложение на memory-бэкенде и заглушках, HTTP-клиент."""
+
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 

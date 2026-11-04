@@ -1,4 +1,4 @@
-"""TextExtractor adapters and TextExtractionService (format resolution, magic bytes, errors)."""
+"""Адаптеры TextExtractor и TextExtractionService (выбор формата, magic bytes, ошибки)."""
 
 import pytest
 

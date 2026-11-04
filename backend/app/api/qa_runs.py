@@ -1,4 +1,4 @@
-"""/kb/qa_runs — Q&A history and review queue."""
+"""/kb/qa_runs — история вопросов и ответов и очередь на ревью (needs_review=true)."""
 
 from typing import Annotated
 
@@ -15,6 +15,7 @@ QA_LIMIT_MAX = 100
 
 
 def _out(r: QaRun) -> QaRunOut:
+    """Доменный QaRun → DTO (id строкой)."""
     return QaRunOut(
         id=str(r.id),
         created_at=r.created_at,

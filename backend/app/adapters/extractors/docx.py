@@ -1,8 +1,8 @@
-"""DOCX (Office Open XML) via python-docx: paragraphs and table cells in document order.
+"""DOCX (Office Open XML) через python-docx: абзацы и ячейки таблиц в порядке документа.
 
-Paragraphs are separated by blank lines (so chunking keeps them apart); a heading is glued to the
-next paragraph like in the .txt/.md knowledge-base documents; a table becomes one block, one line
-per row, cells joined with " | " (merged cells are not repeated).
+Абзацы разделяются пустыми строками (чтобы нарезка держала их отдельно); заголовок «приклеивается»
+к следующему абзацу, как в .txt/.md-документах базы знаний; таблица становится одним блоком — строка
+на строку таблицы, ячейки через " | " (объединённые ячейки не повторяются).
 """
 
 import io
@@ -17,17 +17,19 @@ from app.domain.errors import ExtractionFailed
 
 
 def _is_heading(p: Paragraph) -> bool:
+    """Абзац со стилем заголовка (англ. или рус. название стиля)."""
     name = (p.style.name if p.style is not None else "") or ""
     return name.lower().startswith(("heading", "title", "заголовок"))
 
 
 def _table_text(t: Table) -> str:
+    """Таблица → текст: строка таблицы на строку, ячейки через " | "."""
     rows: list[str] = []
     for row in t.rows:
         cells: list[str] = []
         for cell in row.cells:
             txt = " ".join(cell.text.split())
-            if txt and (not cells or cells[-1] != txt):  # merged cells repeat in python-docx
+            if txt and (not cells or cells[-1] != txt):  # python-docx повторяет объединённые ячейки
                 cells.append(txt)
         if cells:
             rows.append(" | ".join(cells))
@@ -35,6 +37,8 @@ def _table_text(t: Table) -> str:
 
 
 class DocxExtractor(FileFormat):
+    """Адаптер DOCX. Сигнатура ``PK\x03\x04`` — DOCX это ZIP-архив."""
+
     format = "docx"
     mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     extensions = frozenset({".docx"})
@@ -42,6 +46,11 @@ class DocxExtractor(FileFormat):
     magic = (b"PK\x03\x04",)
 
     def extract(self, data: bytes) -> str:
+        """Текст документа.
+
+        Raises:
+            ExtractionFailed: не ZIP/не DOCX или в документе нет текста.
+        """
         try:
             doc = open_docx(io.BytesIO(data))
         except (zipfile.BadZipFile, KeyError, ValueError) as e:
@@ -52,6 +61,7 @@ class DocxExtractor(FileFormat):
             text = _table_text(item) if isinstance(item, Table) else item.text.strip()
             if not text:
                 continue
+            # Заголовок откладываем до следующего блока; два заголовка подряд — первый уходит отдельно.
             if isinstance(item, Paragraph) and _is_heading(item):
                 if heading is not None:
                     blocks.append(heading)

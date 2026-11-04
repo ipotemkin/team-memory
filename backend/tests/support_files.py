@@ -1,4 +1,4 @@
-"""Sample upload files for extractor/API tests (docx built in-test, pdf committed fixture)."""
+"""Образцы файлов для тестов экстракторов и API (docx собирается в тесте, pdf — закоммиченная фикстура)."""
 
 import io
 from pathlib import Path

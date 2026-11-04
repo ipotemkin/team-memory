@@ -1,4 +1,4 @@
-"""Health endpoints."""
+"""Health-эндпоинты: /health/live — процесс жив; /health — основные зависимости (БД, хранилище, очередь)."""
 
 from typing import Any
 

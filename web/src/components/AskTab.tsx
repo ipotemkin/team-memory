@@ -1,3 +1,4 @@
+// Вкладка «Вопросы»: вопрос к базе знаний (/kb/ask), ответ с источниками и бейджем ручной проверки.
 import { useState, type FormEvent, type KeyboardEvent } from "react";
 import { ApiError, api, errorMessage } from "../api/client";
 import { LIMITS, type AskResponse } from "../api/types";
@@ -5,6 +6,7 @@ import { ReviewBadge } from "./Badges";
 import { SourcesList } from "./Sources";
 import { useToast } from "./Toasts";
 
+/** Клиентская проверка вопроса (те же лимиты, что на сервере). Возвращает текст ошибки или undefined. */
 export function validateQuestion(q: string): string | undefined {
   const t = q.trim();
   if (t.length < LIMITS.questionMin) return `Вопрос должен быть не короче ${LIMITS.questionMin} символов`;
@@ -12,6 +14,7 @@ export function validateQuestion(q: string): string | undefined {
   return undefined;
 }
 
+/** Форма вопроса и ответ. Отправка — кнопкой или Ctrl/Cmd+Enter. */
 export function AskTab() {
   const toast = useToast();
   const [question, setQuestion] = useState("");
@@ -20,6 +23,7 @@ export function AskTab() {
   const [result, setResult] = useState<AskResponse | null>(null);
 
   const ask = async () => {
+    // Повторная отправка во время запроса игнорируется.
     if (loading) return;
     const v = validateQuestion(question);
     setError(v);
@@ -28,6 +32,7 @@ export function AskTab() {
     try {
       setResult(await api.ask(question));
     } catch (e) {
+      // 422 — ошибка валидации на сервере: показываем у поля, остальное — уведомлением.
       if (e instanceof ApiError && e.status === 422) setError(e.fieldErrors().question ?? e.message);
       else toast(errorMessage(e));
     } finally {

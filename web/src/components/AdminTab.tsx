@@ -1,8 +1,10 @@
+// Вкладка «Админ»: вход по токену, состояние сервисов, реестр моделей эмбеддингов и blue/green-переиндексация.
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ADMIN_TOKEN_KEY, adminApi, ApiError, errorMessage } from "../api/client";
 import type { EmbeddingModel, HealthReport } from "../api/types";
 import { useToast } from "./Toasts";
 
+// Подписи статусов модели в реестре.
 const STATUS_LABEL: Record<EmbeddingModel["status"], string> = {
   indexing: "индексация",
   ready: "готова",
@@ -11,6 +13,7 @@ const STATUS_LABEL: Record<EmbeddingModel["status"], string> = {
   failed: "ошибка",
 };
 
+// Токен из sessionStorage; если хранилище недоступно (приватный режим и т.п.) — пусто.
 function readToken(): string {
   try {
     return sessionStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
@@ -19,6 +22,7 @@ function readToken(): string {
   }
 }
 
+/** Вкладка администрирования. Данные грузятся только когда вкладка активна (`active`). */
 export function AdminTab({ active }: { active: boolean }) {
   const toast = useToast();
   const [token, setToken] = useState<string>(readToken);
@@ -28,6 +32,7 @@ export function AdminTab({ active }: { active: boolean }) {
   const [form, setForm] = useState({ provider: "ollama", name: "", dimension: "1024" });
   const [busy, setBusy] = useState<string | null>(null);
 
+  // 401 — токен неверный: забываем его и возвращаемся к форме входа.
   const fail = useCallback(
     (e: unknown) => {
       if (e instanceof ApiError && e.status === 401) {
@@ -79,6 +84,7 @@ export function AdminTab({ active }: { active: boolean }) {
     setHealth(null);
   };
 
+  // Обёртка для действий над моделями: блокирует кнопки, показывает результат и перечитывает данные.
   const act = async (key: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(key);
     try {
@@ -172,6 +178,7 @@ export function AdminTab({ active }: { active: boolean }) {
                         onClick={() => void act(`r:${m.name}`, () => adminApi.reindex(token, m.name), `Переиндексация ${m.name} запущена`)}>
                         Переиндексировать
                       </button>
+                      {/* Активировать можно только полностью проиндексированную (ready) модель — сервер проверяет то же. */}
                       <button type="button" disabled={busy !== null || m.status !== "ready"}
                         onClick={() => void act(`a:${m.name}`, () => adminApi.activate(token, m.name), `Модель ${m.name} активна`)}>
                         Активировать

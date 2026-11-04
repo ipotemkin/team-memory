@@ -1,3 +1,4 @@
+// Общая настройка Vitest: jest-dom и очистка после каждого теста.
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";

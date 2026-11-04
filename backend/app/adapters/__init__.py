@@ -1,1 +1,5 @@
-"""Adapters implementing domain ports. Imported only by composition.py."""
+"""Адаптеры — реализации портов домена (``app/domain/ports.py``) для конкретной инфраструктуры.
+
+Импортируются только из ``composition.py`` (composition root); сервисы и домен о них не знают —
+это проверяет import-linter.
+"""

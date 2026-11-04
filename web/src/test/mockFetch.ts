@@ -1,3 +1,4 @@
+// Подмена fetch для тестов: маршруты-обработчики и журнал вызовов.
 import { vi } from "vitest";
 
 export type Handler = (url: URL, init: RequestInit | undefined) => { status?: number; body: unknown } | undefined;

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Smoke test of the 3 spec scenarios against a running API (default: docker compose stack).
+# Smoke-тест 3 сценариев ТЗ против запущенного API (по умолчанию — стек docker compose).
 #   API_URL=http://localhost:8000 ./scripts/smoke.sh
-#   PSQL="psql postgresql://kb:kb@127.0.0.1:5432/kb" ./scripts/smoke.sh   # without docker
+#   PSQL="psql postgresql://kb:kb@127.0.0.1:5432/kb" ./scripts/smoke.sh   # без docker
 set -euo pipefail
 API_URL="${API_URL:-http://localhost:8000}"
 PSQL="${PSQL:-docker compose exec -T postgres psql -U kb -d kb}"
+# Уникальная метка прогона: позволяет найти свои записи и не путать их с прошлыми прогонами.
 TAG="smoke-$(date +%s)"
 pass() { printf '\033[32mPASS\033[0m %s\n' "$*"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$*"; exit 1; }
+# json 'выражение' — вычислить Python-выражение над JSON из stdin (переменная d).
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {}, {'d': d}))" "$1"; }
 
 curl -fsS "$API_URL/health/live" >/dev/null || fail "API is not reachable at $API_URL"

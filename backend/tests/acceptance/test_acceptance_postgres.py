@@ -1,6 +1,6 @@
-"""Acceptance: the 3 spec scenarios through HTTP on the real Postgres backend (+ S3 for uploads).
+"""Приёмка: 3 сценария ТЗ через HTTP на реальном Postgres (+ S3 для загрузок).
 
-Runs only with TEST_DATABASE_URL (S3 upload case also needs TEST_S3_ENDPOINT_URL).
+Запускается только с TEST_DATABASE_URL (случай загрузки в S3 требует ещё TEST_S3_ENDPOINT_URL).
 """
 
 from collections.abc import AsyncIterator

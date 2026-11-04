@@ -1,3 +1,5 @@
+"""Контракты инфраструктурных портов: FileStorage, TaskQueue, Embedder, ChatLLM, AuditSink."""
+
 import math
 from typing import Any
 

@@ -1,3 +1,5 @@
+"""Guardrails ответа: нормализация цитат, проверка источников, решение needs_review и его инварианты."""
+
 import pytest
 
 from app.domain.guardrails import Decision, decide_review, normalize, verify_quotes

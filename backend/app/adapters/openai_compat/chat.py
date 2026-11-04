@@ -1,7 +1,8 @@
-"""ChatLLM over /chat/completions with Structured Outputs (strict json_schema).
+"""ChatLLM поверх ``/chat/completions`` со Structured Outputs (строгая ``json_schema``).
 
-If the endpoint/model rejects json_schema (HTTP 400 mentioning response_format), we fall back once to
-``json_object`` mode and remember it; the answer is always validated with the strict AiAnswer model.
+Если сервер/модель не принимает json_schema (HTTP 400 с упоминанием response_format), один раз
+переходим на режим ``json_object`` и запоминаем это; ответ в любом случае проверяется строгой
+моделью AiAnswer, так что формат ответа гарантирован не сервером, а нами.
 """
 
 import json
@@ -17,6 +18,7 @@ from app.domain.prompts import SYSTEM_PROMPT
 
 log = logging.getLogger("app.openai_compat")
 
+# JSON-схема ответа для Structured Outputs (strict): все поля обязательны, лишние запрещены.
 AI_ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -37,6 +39,7 @@ AI_ANSWER_SCHEMA: dict[str, Any] = {
     },
 }
 
+# Подсказка о формате для режима json_object (там схема серверу не передаётся).
 JSON_OBJECT_HINT = (
     '\nФормат ответа — один JSON-объект: {"answer": str, "sources": [{"quote": str}], '
     '"confidence": "high"|"medium"|"low", "needs_review": bool}. Никаких других полей.'
@@ -46,10 +49,21 @@ Mode = Literal["auto", "json_schema", "json_object"]
 
 
 def user_prompt(question: str, context: str) -> str:
+    """Пользовательское сообщение: контекст в «рамке» <<< >>> и вопрос."""
     return f"Контекст:\n<<<\n{context}\n>>>\n\nВопрос: {question}"
 
 
 class OpenAICompatChatLLM:
+    """Порт ChatLLM для OpenAI-совместимого сервера.
+
+    Args:
+        client: HTTP-клиент с ретраями и таймаутами.
+        model: имя чат-модели (CHAT_MODEL).
+        mode: auto — json_schema с откатом на json_object; либо принудительно один из режимов
+            (OPENAI_STRUCTURED_OUTPUTS, для Ollama — json_object).
+        temperature: 0 — максимально детерминированные ответы.
+    """
+
     def __init__(
         self, client: OpenAICompatClient, model: str, mode: Mode = "auto", temperature: float = 0.0
     ) -> None:
@@ -61,6 +75,7 @@ class OpenAICompatChatLLM:
     def _payload(
         self, question: str, context: str, fmt: Literal["json_schema", "json_object"]
     ) -> dict[str, Any]:
+        """Тело запроса chat/completions для выбранного формата ответа."""
         system = SYSTEM_PROMPT + (JSON_OBJECT_HINT if fmt == "json_object" else "")
         rf: dict[str, Any] = (
             {
@@ -81,12 +96,19 @@ class OpenAICompatChatLLM:
         }
 
     async def answer_with_sources(self, question: str, context: str) -> AiAnswer:
+        """Задаёт вопрос модели и возвращает проверенный ``AiAnswer``.
+
+        Raises:
+            LLMError: сеть/таймаут/HTTP-ошибка (после ретраев клиента).
+            LLMInvalidJSON: ответ не соответствует схеме или модель отказалась отвечать.
+        """
         fmt: Literal["json_schema", "json_object"] = (
             "json_object" if self._mode == "json_object" else "json_schema"
         )
         try:
             data = await self._c.post("chat/completions", self._payload(question, context, fmt))
         except ApiStatusError as e:
+            # Откатываемся на json_object только в режиме auto и только если ошибка про response_format.
             unsupported = e.status == 400 and ("response_format" in e.body or "json_schema" in e.body)
             if not (unsupported and fmt == "json_schema" and self._mode == "auto"):
                 raise
@@ -97,6 +119,12 @@ class OpenAICompatChatLLM:
 
 
 def parse_answer(data: dict[str, Any]) -> AiAnswer:
+    """Достаёт JSON из ответа chat/completions и валидирует его моделью ``AiAnswer``.
+
+    Raises:
+        LLMError: структура ответа не похожа на chat completion.
+        LLMInvalidJSON: отказ модели (refusal), пустой контент, невалидный JSON или схема.
+    """
     try:
         msg = data["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as e:

@@ -1,3 +1,5 @@
+"""Нарезка текста на фрагменты: по пустым строкам, смещения, длинные абзацы и предложения."""
+
 from app.domain.chunking import chunk_paragraphs, sha256_text
 
 

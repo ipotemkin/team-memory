@@ -1,7 +1,7 @@
-"""Live smoke against the real provider (ProxyAPI/OpenAI). Runs only when OPENAI_API_KEY is set.
+"""Живой smoke против реального провайдера (ProxyAPI/OpenAI). Только при заданном OPENAI_API_KEY.
 
     cd backend && OPENAI_API_KEY=sk-... uv run pytest -m live -q
-Costs a fraction of a cent (gpt-4o-mini + text-embedding-3-small, a few hundred tokens).
+Стоит доли цента (gpt-4o-mini + text-embedding-3-small, несколько сотен токенов).
 """
 
 import math

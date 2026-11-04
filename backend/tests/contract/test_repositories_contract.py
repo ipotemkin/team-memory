@@ -1,3 +1,5 @@
+"""Контракт репозиториев и UoW: документы, фрагменты и эмбеддинги, qa_runs, транзакционный аудит."""
+
 from collections.abc import Callable
 
 import pytest

@@ -1,4 +1,4 @@
-"""In-memory embedding-model registry (reference implementation of EmbeddingModelRegistry)."""
+"""In-memory реестр моделей эмбеддингов (эталонная реализация порта EmbeddingModelRegistry)."""
 
 from app.adapters.memory.store import MemoryStore
 from app.domain.errors import Conflict, NotFound
@@ -6,6 +6,8 @@ from app.domain.models import EmbeddingModelInfo, utcnow
 
 
 class MemoryEmbeddingRegistry:
+    """Реестр моделей, хранящийся в ``MemoryStore`` вместе с эмбеддингами."""
+
     def __init__(self, store: MemoryStore) -> None:
         self._store = store
 
@@ -14,6 +16,11 @@ class MemoryEmbeddingRegistry:
         return self._store.state.embedding_models
 
     def _upd(self, name: str, **kw: object) -> None:
+        """Обновляет поля модели.
+
+        Raises:
+            NotFound: модели нет.
+        """
         info = self._m.get(name)
         if info is None:
             raise NotFound(f"embedding model {name!r}")
@@ -51,6 +58,7 @@ class MemoryEmbeddingRegistry:
         self._upd(name, progress_done=done, progress_total=total)
 
     async def coverage(self, name: str) -> tuple[int, int]:
+        """Покрытие: эмбеддинг считается актуальным, если его sha совпадает с текущим текстом фрагмента."""
         st = self._store.state
         done = sum(
             1
@@ -63,7 +71,8 @@ class MemoryEmbeddingRegistry:
         if name not in self._m:
             raise NotFound(f"embedding model {name!r}")
         now = utcnow()
-        models = dict(self._m)  # build the new state, then swap (atomic for readers)
+        models = dict(self._m)  # строим новое состояние и подменяем целиком —
+        # читатели видят либо старую, либо новую активную модель (атомарно)
         for n, i in models.items():
             if i.status == "active" and n != name:
                 models[n] = i.model_copy(update={"status": "retired", "retired_at": now})

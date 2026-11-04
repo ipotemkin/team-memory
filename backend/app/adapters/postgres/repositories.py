@@ -1,4 +1,7 @@
-"""Postgres repositories: Document/QaRun via ORM, Snippet via Core bulk; PostgresAuditSink."""
+"""Репозитории Postgres: документы и qa_runs через ORM, фрагменты — через Core (массово); аудит.
+
+Все репозитории работают в сессии UnitOfWork и не делают commit сами — транзакцией управляет UoW.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,8 @@ from app.domain.models import AuditRecord, Document, DocumentStatus, NewDocument
 
 
 class PgDocumentRepository:
+    """Порт DocumentRepository (ORM)."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
@@ -30,6 +35,7 @@ class PgDocumentRepository:
         return document_to_domain(row)
 
     async def get(self, id: int) -> Document | None:
+        """populate_existing: перечитываем строку из БД, даже если она уже есть в сессии."""
         row = await self._s.get(DocumentRow, id, populate_existing=True)
         return document_to_domain(row) if row else None
 
@@ -43,6 +49,7 @@ class PgDocumentRepository:
         return [document_to_domain(r) for r in (await self._s.scalars(stmt)).all()]
 
     async def set_status(self, id: int, status: DocumentStatus, error: str | None = None) -> None:
+        """Меняет статус; при переходе в ready проставляет indexed_at."""
         await self._s.execute(
             text(
                 "UPDATE app.documents SET status = CAST(:st AS app.document_status), status_error = :err, "
@@ -54,10 +61,16 @@ class PgDocumentRepository:
 
 
 class PgSnippetRepository:
+    """Порт SnippetRepository (Core, массовые операции)."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
     async def replace_for_document(self, document_id: int, items: list[Snippet]) -> list[Snippet]:
+        """Удаляет фрагменты документа и вставляет новые одним INSERT ... RETURNING.
+
+        Эмбеддинги старых фрагментов удаляются каскадно (FK ON DELETE CASCADE).
+        """
         await self._s.execute(delete(snippets).where(snippets.c.document_id == document_id))
         if not items:
             return []
@@ -86,6 +99,13 @@ class PgSnippetRepository:
         return [snippet_from_row(m) for m in res.mappings()]
 
     async def upsert_embeddings(self, model: str, items: list[tuple[int, str, list[float]]]) -> int:
+        """Вставляет или обновляет эмбеддинги модели одним запросом.
+
+        Пачка передаётся одним JSONB-параметром и разворачивается ``jsonb_to_recordset``. JOIN со
+        snippets
+        отбрасывает фрагменты, удалённые, пока считались векторы (переиндексация документа). Если модели
+        ещё нет в реестре, она регистрируется (провайдер — префикс имени до ":").
+        """
         if not items:
             return 0
         dim = len(items[0][2])
@@ -116,6 +136,7 @@ class PgSnippetRepository:
         return int(getattr(res, "rowcount", 0) or 0)
 
     async def missing_embeddings(self, model: str, batch: int) -> list[Snippet]:
+        """Фрагменты без эмбеддинга модели или с эмбеддингом устаревшего текста (по text_sha256)."""
         res = await self._s.execute(
             text(
                 "SELECT s.id, s.document_id, s.ord, s.snippet_text, s.text_sha256, s.char_start, s.char_end "
@@ -129,6 +150,8 @@ class PgSnippetRepository:
 
 
 class PgQaRunRepository:
+    """Порт QaRunRepository (ORM)."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._s = session
 
@@ -155,7 +178,7 @@ class PgQaRunRepository:
 
 
 class PostgresAuditSink:
-    """Transactional audit sink: writes into the UoW session (committed with the business data)."""
+    """Транзакционный приёмник аудита: пишет в сессию UoW (фиксируется вместе с бизнес-данными)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._s = session

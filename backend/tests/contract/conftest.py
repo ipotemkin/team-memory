@@ -1,9 +1,9 @@
-"""Port contract fixtures, parametrized over implementations.
+"""Фикстуры контрактов портов, параметризованные по реализациям.
 
-memory/stub always run; postgres and s3 are `integration` and run only when
-TEST_DATABASE_URL / TEST_S3_ENDPOINT_URL are set (see `make test-integration`).
-Each Postgres test starts and ends with TRUNCATE ... RESTART IDENTITY; each S3 test
-uses its own bucket that is emptied and deleted afterwards.
+memory/stub запускаются всегда; postgres и s3 помечены ``integration`` и идут только при
+TEST_DATABASE_URL / TEST_S3_ENDPOINT_URL (см. ``make test-integration``).
+Каждый Postgres-тест начинается и заканчивается TRUNCATE ... RESTART IDENTITY; каждый S3-тест
+использует свой бакет, который затем очищается и удаляется.
 """
 
 from collections.abc import AsyncIterator, Callable

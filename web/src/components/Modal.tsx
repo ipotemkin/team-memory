@@ -1,5 +1,7 @@
+// Модальная боковая панель: закрытие по Esc и клику по фону, фокус внутрь и обратно.
 import { useEffect, useRef, type ReactNode } from "react";
 
+/** Диалог с заголовком; при закрытии фокус возвращается на элемент, открывший его. */
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -23,6 +25,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         aria-label={title}
         tabIndex={-1}
         ref={ref}
+        // Клик внутри панели не должен закрывать её (не всплывает до фона).
         onClick={(e) => e.stopPropagation()}
       >
         <header className="panel-head">

@@ -1,4 +1,6 @@
-"""Blue/green reindex on memory adapters: register -> reindex -> activate -> ask uses new model."""
+"""Blue/green-переиндексация на memory-адаптерах: регистрация → переиндексация → активация → ответ новой
+моделью.
+"""
 
 import pytest
 

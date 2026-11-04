@@ -1,4 +1,8 @@
-"""Application settings (pydantic-settings, env / .env)."""
+"""Настройки приложения (pydantic-settings: переменные окружения / .env).
+
+Читаются один раз (``get_settings`` кешируется); composition.py выбирает по ним адаптеры.
+Описание каждой переменной — в ``.env.example``.
+"""
 
 from functools import lru_cache
 from typing import Literal
@@ -7,6 +11,7 @@ from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Все настройки сервиса. Секреты помечены repr=False — не попадают в логи и repr.
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -17,17 +22,19 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET: str = "documents"
     S3_REGION: str = "us-east-1"
-    S3_PUBLIC_ENDPOINT_URL: str | None = None  # for presigned URLs reachable from the browser
+    S3_PUBLIC_ENDPOINT_URL: str | None = None  # для presigned-ссылок, доступных из браузера
     DB_POOL_SIZE: int = 10
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Выбор адаптеров для портов (см. composition.py).
     DB_BACKEND: Literal["postgres", "postgres_sqlalchemy", "memory"] = "postgres"
     LLM_PROVIDER: Literal["openai_compat", "stub"] = "stub"
     EMBEDDINGS_PROVIDER: Literal["openai_compat", "stub"] = "stub"
     STORAGE_BACKEND: Literal["s3", "memory"] = "s3"
     QUEUE_BACKEND: Literal["celery", "inline", "memory"] = "celery"
-    AUDIT_SINKS: str = "db"  # comma-separated: db,kafka,log
+    AUDIT_SINKS: str = "db"  # через запятую: db (транзакционно в UoW), memory (тесты)
 
+    # OpenAI-совместимый API (ProxyAPI / OpenAI / Ollama).
     OPENAI_BASE_URL: str = "https://api.proxyapi.ru/openai/v1"
     OPENAI_API_KEY: str = Field(default="", repr=False)
     CHAT_MODEL: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("CHAT_MODEL", "LLM_MODEL"))
@@ -39,40 +46,44 @@ class Settings(BaseSettings):
     CHAT_TEMPERATURE: float = 0.0
     EMBED_BATCH_SIZE: int = 64
 
+    # Фоновая индексация, аудит, гибридный поиск (k в формуле RRF: 1/(k + ранг)).
     INDEX_MAX_RETRIES: int = 3
     INDEX_RETRY_BACKOFF_S: int = 10
     AUDIT_PARTITIONS_MONTHS: int = 2
     RRF_K: int = 60
 
+    # HTTP: лимиты загрузки и аудита, CORS, срок жизни ссылок на скачивание.
     MAX_UPLOAD_MB: int = 20
     AUDIT_MAX_BODY_KB: int = 10
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
     DOWNLOAD_URL_TTL_S: int = 900
-    UPLOAD_FORMATS: str = "txt,md,docx,pdf"  # enabled upload formats (TextExtractor adapters)
+    UPLOAD_FORMATS: str = "txt,md,docx,pdf"  # включённые форматы загрузки (адаптеры TextExtractor)
 
-    # Stage 8: operations
-    ADMIN_TOKEN: str = Field(default="", repr=False)  # empty -> /admin disabled (404)
+    # Этап 8: эксплуатация (админка, ClickHouse, Ollama, логи, метрики)
+    ADMIN_TOKEN: str = Field(default="", repr=False)  # пусто → /admin выключен (404)
     AUDIT_BACKEND: Literal["postgres", "clickhouse", "both"] = "postgres"
     CLICKHOUSE_HOST: str = "localhost"
-    CLICKHOUSE_PORT: int = 8124  # HTTP interface (compose profile "clickhouse" maps 8124 -> 8123)
+    CLICKHOUSE_PORT: int = 8124  # HTTP-интерфейс (профиль compose "clickhouse" пробрасывает 8124 → 8123)
     CLICKHOUSE_USER: str = "default"
     CLICKHOUSE_PASSWORD: str = Field(default="", repr=False)
     CLICKHOUSE_DATABASE: str = "kb"
     CLICKHOUSE_TABLE: str = "audit_runs"
     CLICKHOUSE_SECURE: bool = False
-    LLM_BASE_URL: str | None = None  # default: OPENAI_BASE_URL (Ollama: http://localhost:11434/v1)
-    LLM_API_KEY: str | None = Field(default=None, repr=False)  # default: OPENAI_API_KEY
-    EMBED_BASE_URL: str | None = None  # default: OPENAI_BASE_URL
-    EMBED_API_KEY: str | None = Field(default=None, repr=False)  # default: OPENAI_API_KEY
+    LLM_BASE_URL: str | None = None  # по умолчанию OPENAI_BASE_URL (Ollama: http://localhost:11434/v1)
+    LLM_API_KEY: str | None = Field(default=None, repr=False)  # по умолчанию OPENAI_API_KEY
+    EMBED_BASE_URL: str | None = None  # по умолчанию OPENAI_BASE_URL
+    EMBED_API_KEY: str | None = Field(default=None, repr=False)  # по умолчанию OPENAI_API_KEY
     REINDEX_BATCH_SIZE: int = 64
     LOG_FORMAT: Literal["json", "text"] = "json"
     LOG_LEVEL: str = "INFO"
     METRICS_ENABLED: bool = False
 
+    # RAG: сколько фрагментов брать в контекст и порог релевантности.
     TOP_K: int = 5
-    MIN_SCORE: float = 0.6  # retriever score threshold (0..1)
+    MIN_SCORE: float = 0.6  # порог score ретривера (0..1): ниже — фрагмент не идёт в контекст
 
     @property
+    # Производные значения: списки из CSV-строк и адреса/ключи с откатом на OPENAI_*.
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
@@ -111,4 +122,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Настройки процесса (кешируются; в тестах ``Settings`` создаётся явно)."""
     return Settings()

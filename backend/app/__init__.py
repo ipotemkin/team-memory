@@ -1,1 +1,1 @@
-"""Team Memory backend application."""
+"""Бэкенд Team Memory: база знаний команды с ответами по источникам (FastAPI + Celery)."""

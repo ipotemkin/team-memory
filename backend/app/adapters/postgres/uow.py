@@ -1,4 +1,4 @@
-"""SQLAlchemy UnitOfWork: one AsyncSession/transaction per `async with`."""
+"""UnitOfWork на SQLAlchemy: одна AsyncSession и одна транзакция на каждый ``async with``."""
 
 from typing import Self
 
@@ -15,6 +15,13 @@ from app.domain.ports import AuditSink, DocumentRepository, QaRunRepository, Sni
 
 
 class SqlAlchemyUnitOfWork:
+    """Порт UnitOfWork для Postgres.
+
+    Args:
+        session_factory: фабрика сессий.
+        audit_enabled: False — аудит не пишется в Postgres (подставляется NullAuditSink).
+    """
+
     documents: DocumentRepository
     snippets: SnippetRepository
     qa_runs: QaRunRepository
@@ -26,7 +33,7 @@ class SqlAlchemyUnitOfWork:
         self._session: AsyncSession | None = None
 
     async def __aenter__(self) -> Self:
-        s = self._factory()  # autobegin on first statement
+        s = self._factory()  # транзакция начнётся автоматически с первого запроса
         self._session = s
         self.documents = PgDocumentRepository(s)
         self.snippets = PgSnippetRepository(s)
@@ -35,8 +42,9 @@ class SqlAlchemyUnitOfWork:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
+        """Откатывает незафиксированное (после commit это no-op) и закрывает сессию."""
         if self._session is not None:
-            await self._session.rollback()  # no-op after commit
+            await self._session.rollback()  # после commit ничего не делает
             await self._session.close()
             self._session = None
 
@@ -46,7 +54,7 @@ class SqlAlchemyUnitOfWork:
 
 
 class NullAuditSink:
-    """AUDIT_BACKEND=clickhouse: audit rows go only to the external sink, not to Postgres."""
+    """AUDIT_BACKEND=clickhouse: записи аудита уходят только во внешний приёмник, не в Postgres."""
 
     async def record(self, rec: AuditRecord) -> None:
         return None

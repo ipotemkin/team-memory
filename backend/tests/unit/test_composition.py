@@ -1,3 +1,5 @@
+"""Сборка контейнера (composition root): memory end-to-end, подключение адаптеров по настройкам."""
+
 import pytest
 
 from app.adapters.celery_queue.queue import CeleryTaskQueue

@@ -1,4 +1,4 @@
-"""/admin API: token auth, embedding-model registry, blue/green reindex, health; request id, metrics."""
+"""/admin API: токен, реестр моделей эмбеддингов, blue/green-переиндексация, health; request id, метрики."""
 
 from collections.abc import Callable
 from typing import Any

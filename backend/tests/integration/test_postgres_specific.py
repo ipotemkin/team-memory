@@ -1,4 +1,4 @@
-"""Postgres-only behaviour: DB CHECK invariants, partitions, HNSW helper, UoW atomicity, service flow."""
+"""Поведение только Postgres: CHECK-инварианты, партиции, HNSW-хелпер, атомарность UoW, поток сервиса."""
 
 from collections.abc import AsyncIterator
 from typing import Any

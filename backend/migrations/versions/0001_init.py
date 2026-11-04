@@ -1,4 +1,4 @@
-"""init: pgvector extension and app schema
+"""init: расширение pgvector и схема app.
 
 Revision ID: 0001
 Revises:

@@ -1,4 +1,10 @@
-"""Ports (typing.Protocol). Services depend only on these and domain models."""
+"""Порты гексагональной архитектуры (``typing.Protocol``).
+
+Сервисы (``app/services``) зависят только от этих протоколов и доменных моделей; конкретные
+реализации — адаптеры в ``app/adapters`` (postgres, memory, s3, openai_compat, stubs, celery_queue,
+clickhouse, extractors). Какой адаптер подставить, решает composition root (``composition.py``)
+по настройкам окружения. Протоколы структурные: адаптеру не нужно от них наследоваться.
+"""
 
 from __future__ import annotations
 
@@ -20,130 +26,261 @@ from app.domain.models import (
 
 
 class DocumentRepository(Protocol):
-    async def add(self, doc: NewDocument) -> Document: ...
-    async def get(self, id: int) -> Document | None: ...
-    async def list(self, page: Page) -> list[Document]: ...
-    async def set_status(self, id: int, status: DocumentStatus, error: str | None = None) -> None: ...
+    """Хранилище документов (таблица documents)."""
+
+    async def add(self, doc: NewDocument) -> Document:
+        """Сохраняет новый документ со статусом uploaded и возвращает его с id."""
+        ...
+
+    async def get(self, id: int) -> Document | None:
+        """Документ по id или None."""
+        ...
+
+    async def list(self, page: Page) -> list[Document]:
+        """Страница документов, новые первыми."""
+        ...
+
+    async def set_status(self, id: int, status: DocumentStatus, error: str | None = None) -> None:
+        """Меняет статус документа; ``error`` — текст ошибки для статуса failed."""
+        ...
 
 
 class SnippetRepository(Protocol):
-    async def replace_for_document(self, document_id: int, snippets: list[Snippet]) -> list[Snippet]: ...
-    async def list_for_document(self, document_id: int) -> list[Snippet]: ...
-    async def upsert_embeddings(self, model: str, items: list[tuple[int, str, list[float]]]) -> int: ...
-    async def missing_embeddings(self, model: str, batch: int) -> list[Snippet]: ...
+    """Хранилище фрагментов документов и их эмбеддингов (по модели)."""
+
+    async def replace_for_document(self, document_id: int, snippets: list[Snippet]) -> list[Snippet]:
+        """Атомарно заменяет все фрагменты документа новыми; возвращает их с id."""
+        ...
+
+    async def list_for_document(self, document_id: int) -> list[Snippet]:
+        """Фрагменты документа в порядке ord."""
+        ...
+
+    async def upsert_embeddings(self, model: str, items: list[tuple[int, str, list[float]]]) -> int:
+        """Сохраняет эмбеддинги модели ``model``.
+
+        ``items`` — кортежи (snippet_id, text_sha256, вектор); sha фиксирует, для какой версии текста
+        посчитан вектор. Возвращает число записанных строк.
+        """
+        ...
+
+    async def missing_embeddings(self, model: str, batch: int) -> list[Snippet]:
+        """До ``batch`` фрагментов, у которых нет актуального эмбеддинга модели ``model``."""
+        ...
 
 
 class Retriever(Protocol):
+    """Поиск фрагментов по вопросу (гибридный: полнотекстовый + векторный)."""
+
     async def search(
         self, query: str, qvec: list[float] | None, model: str | None, k: int
-    ) -> list[ScoredSnippet]: ...
+    ) -> list[ScoredSnippet]:
+        """Возвращает до ``k`` лучших фрагментов документов в статусе ready.
+
+        Args:
+            query: текст вопроса (для полнотекстового поиска).
+            qvec: эмбеддинг вопроса или None — тогда только полнотекстовый поиск.
+            model: имя модели эмбеддингов, чьи векторы использовать.
+            k: сколько фрагментов вернуть.
+        """
+        ...
 
 
 class QaRunRepository(Protocol):
-    async def add(self, run: QaRun) -> QaRun: ...
-    async def get(self, id: int) -> QaRun | None: ...
-    async def list(self, page: Page, needs_review: bool | None = None) -> list[QaRun]: ...
+    """История вопросов и ответов (таблица qa_runs)."""
+
+    async def add(self, run: QaRun) -> QaRun:
+        """Сохраняет запуск и возвращает его с id."""
+        ...
+
+    async def get(self, id: int) -> QaRun | None:
+        """Запуск по id или None."""
+        ...
+
+    async def list(self, page: Page, needs_review: bool | None = None) -> list[QaRun]:
+        """Страница запусков, новые первыми; ``needs_review`` — необязательный фильтр."""
+        ...
 
 
 class AuditSink(Protocol):
-    async def record(self, rec: AuditRecord) -> None: ...
+    """Приёмник записей аудита (Postgres, ClickHouse, оба или память)."""
+
+    async def record(self, rec: AuditRecord) -> None:
+        """Записывает одну запись аудита."""
+        ...
 
 
 class FileStorage(Protocol):
-    async def put(self, key: str, data: bytes, mime: str) -> StoredObject: ...
-    async def get(self, key: str) -> bytes: ...
-    async def presign(self, key: str, ttl_s: int = 900) -> str: ...
-    async def delete(self, key: str) -> None: ...
+    """Хранилище оригиналов файлов (S3/MinIO или память)."""
+
+    async def put(self, key: str, data: bytes, mime: str) -> StoredObject:
+        """Кладёт объект и возвращает его описание (bucket, key, размер, sha256, mime)."""
+        ...
+
+    async def get(self, key: str) -> bytes:
+        """Читает объект целиком."""
+        ...
+
+    async def presign(self, key: str, ttl_s: int = 900) -> str:
+        """Временная (``ttl_s`` секунд) ссылка на скачивание объекта."""
+        ...
+
+    async def delete(self, key: str) -> None:
+        """Удаляет объект (используется для отката при ошибке сохранения)."""
+        ...
 
 
 class Embedder(Protocol):
+    """Модель эмбеддингов: имя и размерность вектора."""
+
     model_name: str
     dim: int
 
-    async def embed(self, texts: list[str]) -> list[list[float]]: ...
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        """Считает эмбеддинги для списка текстов (порядок сохраняется)."""
+        ...
 
 
 class ChatLLM(Protocol):
+    """Чат-модель, отвечающая на вопрос по контексту строгим JSON."""
+
     model_name: str
 
     async def answer_with_sources(self, question: str, context: str) -> AiAnswer:
-        """Return a validated AiAnswer; raise LLMError / LLMInvalidJSON."""
+        """Возвращает проверенный по схеме ``AiAnswer``.
+
+        Raises:
+            LLMError: LLM недоступна (таймаут, 5xx, нет ключа).
+            LLMInvalidJSON: ответ не соответствует схеме.
+        """
         ...
 
 
 class TaskQueue(Protocol):
-    async def enqueue(self, task: str, **kwargs: Any) -> str: ...
+    """Очередь фоновых задач (Celery или выполнение «на месте» в памяти)."""
+
+    async def enqueue(self, task: str, **kwargs: Any) -> str:
+        """Ставит задачу ``task`` с именованными аргументами; возвращает id задачи."""
+        ...
 
 
 class UnitOfWork(Protocol):
+    """Единица работы: репозитории, работающие в одной транзакции.
+
+    Использование: ``async with uow: ...; await uow.commit()``. Без commit изменения откатываются.
+    """
+
     documents: DocumentRepository
     snippets: SnippetRepository
     qa_runs: QaRunRepository
-    audit: AuditSink  # transactional sink (Postgres) or memory
+    audit: AuditSink  # транзакционный аудит (Postgres) или память
 
-    async def __aenter__(self) -> Self: ...
-    async def __aexit__(self, *exc: object) -> None: ...  # rollback unless committed
-    async def commit(self) -> None: ...
+    async def __aenter__(self) -> Self:
+        """Открывает транзакцию."""
+        ...
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Закрывает транзакцию; если commit не вызывали — откат."""
+        ...
+
+    async def commit(self) -> None:
+        """Фиксирует транзакцию."""
+        ...
 
 
 class EmbeddingModelRegistry(Protocol):
-    """Registry of embedding models + per-model embedding data (blue/green reindex)."""
+    """Реестр моделей эмбеддингов и данные эмбеддингов по моделям (blue/green-переиндексация).
 
-    async def list(self) -> list[EmbeddingModelInfo]: ...
-    async def get(self, name: str) -> EmbeddingModelInfo | None: ...
-    async def active(self) -> EmbeddingModelInfo | None: ...
+    Новая модель регистрируется (indexing), фоном считаются её векторы (ready), затем атомарно
+    переключается активная модель (active), а старая становится retired. Поиск всегда идёт по
+    активной модели, поэтому переиндексация не мешает ответам.
+    """
+
+    async def list(self) -> list[EmbeddingModelInfo]:
+        """Все зарегистрированные модели."""
+        ...
+
+    async def get(self, name: str) -> EmbeddingModelInfo | None:
+        """Модель по имени или None."""
+        ...
+
+    async def active(self) -> EmbeddingModelInfo | None:
+        """Текущая активная модель или None."""
+        ...
+
     async def register(self, name: str, provider: str, dim: int) -> EmbeddingModelInfo:
-        """Raise Conflict if the name is already registered."""
+        """Регистрирует модель в статусе indexing.
+
+        Raises:
+            Conflict: модель с таким именем уже есть.
+        """
         ...
 
     async def bootstrap(self, name: str, provider: str, dim: int) -> str:
-        """Register if missing; activate if no model is active. Returns the active model name."""
+        """Регистрирует модель, если её нет; активирует, если активной модели нет.
+
+        Вызывается при старте. Возвращает имя активной модели.
+        """
         ...
 
     async def set_status(self, name: str, status: str, error: str | None = None) -> None:
-        """Set status and error together (error=None clears a previous failure)."""
+        """Задаёт статус и ошибку одновременно (error=None стирает прошлую ошибку)."""
         ...
 
-    async def set_progress(self, name: str, done: int, total: int) -> None: ...
+    async def set_progress(self, name: str, done: int, total: int) -> None:
+        """Сохраняет прогресс переиндексации (готово / всего)."""
+        ...
+
     async def coverage(self, name: str) -> tuple[int, int]:
-        """(snippets with an up-to-date embedding of this model, total snippets)."""
+        """(число фрагментов с актуальным эмбеддингом этой модели, всего фрагментов)."""
         ...
 
     async def activate(self, name: str) -> None:
-        """Atomically retire the current active model and make ``name`` active."""
+        """Атомарно переводит текущую активную модель в retired и делает ``name`` активной."""
         ...
 
     async def delete(self, name: str) -> int:
-        """Delete the model's embeddings, index and registry row; returns deleted embeddings."""
+        """Удаляет эмбеддинги модели, её индекс и строку реестра; возвращает число удалённых эмбеддингов."""
         ...
 
-    async def ensure_index(self, name: str) -> None: ...
+    async def ensure_index(self, name: str) -> None:
+        """Создаёт векторный индекс модели (HNSW в Postgres), если его нет."""
+        ...
 
 
 class TextExtractor(Protocol):
-    """Extracts plain text from one uploaded file format (txt, md, docx, pdf, ...).
+    """Извлекает обычный текст из одного формата загружаемых файлов (txt, md, docx, pdf, ...).
 
-    Adding a format = a new adapter + registration in composition.py (UPLOAD_FORMATS).
+    Новый формат = новый адаптер в ``adapters/extractors`` + регистрация (``ALL_EXTRACTORS``,
+    список ``UPLOAD_FORMATS``). Выбор адаптера и проверки — в ``services/extraction.py``.
     """
 
     @property
     def format(self) -> str:
-        """Short name used in UPLOAD_FORMATS, e.g. "pdf"."""
+        """Короткое имя формата для UPLOAD_FORMATS, например "pdf"."""
         ...
 
     @property
     def mime_type(self) -> str:
-        """Canonical MIME type stored with the original."""
+        """Канонический MIME-тип, который сохраняется вместе с оригиналом."""
         ...
 
     def supports(self, extension: str, content_type: str) -> bool:
-        """``extension`` like ".pdf" (lowercase, may be ""), ``content_type`` without parameters."""
+        """Подходит ли адаптер по расширению и MIME-типу.
+
+        ``extension`` вида ".pdf" (в нижнем регистре, может быть ""), ``content_type`` без параметров.
+        """
         ...
 
     def matches(self, data: bytes) -> bool:
-        """Magic-bytes check: does the content look like this format?"""
+        """Проверка сигнатуры (magic bytes): похоже ли содержимое на этот формат."""
         ...
 
     def extract(self, data: bytes) -> str:
-        """Plain text (paragraphs separated by blank lines). Raises UnsupportedFile / ExtractionFailed."""
+        """Возвращает текст (абзацы разделены пустой строкой).
+
+        Raises:
+            UnsupportedFile: содержимое нельзя прочитать как этот формат (например, текст не в UTF-8).
+            ExtractionFailed: файл повреждён или в нём нет текста.
+        """
         ...

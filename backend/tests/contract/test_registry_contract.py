@@ -1,4 +1,4 @@
-"""EmbeddingModelRegistry contract (memory always; postgres with TEST_DATABASE_URL)."""
+"""Контракт EmbeddingModelRegistry (memory всегда; postgres при TEST_DATABASE_URL)."""
 
 from collections.abc import Callable
 

@@ -1,4 +1,4 @@
-"""/ai/answer_with_sources — strict AiAnswer JSON; 502 on LLM errors."""
+"""/ai/answer_with_sources — строгий JSON AiAnswer по готовому контексту; 502 при ошибках LLM."""
 
 from typing import Annotated
 
@@ -23,7 +23,7 @@ async def answer_with_sources(
     try:
         ans = await svc.answer(body.question, body.context)
     except (LLMError, LLMInvalidJSON):
-        deps.mark_audited(request)  # the service audited status=error before re-raising
+        deps.mark_audited(request)  # сервис уже записал аудит status=error перед пробросом
         raise
     deps.mark_audited(request)
     return AiAnswerOut.model_validate(ans.model_dump())

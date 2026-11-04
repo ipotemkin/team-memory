@@ -1,4 +1,7 @@
-"""Uniform error body {"error": code, "detail": ...} and exception handlers."""
+"""Единое тело ошибки {"error": код, "detail": ...} и обработчики исключений.
+
+Доменные исключения (``app.domain.errors``) отображаются здесь в HTTP-коды — домен о HTTP не знает.
+"""
 
 from typing import Any
 
@@ -12,6 +15,14 @@ from app.domain.errors import Conflict, ExtractionFailed, LLMError, LLMInvalidJS
 
 
 class ApiError(Exception):
+    """Ошибка HTTP-слоя с явным кодом и телом.
+
+    Args:
+        status_code: HTTP-статус.
+        error: машинный код ошибки (``not_found``, ``file_too_large``...).
+        detail: подробности (строка или список ошибок полей).
+    """
+
     def __init__(self, status_code: int, error: str, detail: Any = None) -> None:
         super().__init__(error)
         self.status_code = status_code
@@ -20,10 +31,12 @@ class ApiError(Exception):
 
 
 def error_response(status: int, error: str, detail: Any = None) -> JSONResponse:
+    """Ответ в едином формате ошибки."""
     return JSONResponse(status_code=status, content={"error": error, "detail": detail})
 
 
 def field_errors(errors: Any) -> list[dict[str, str]]:
+    """Ошибки pydantic → [{field, msg}]; служебные префиксы loc (body/query/path) убираются."""
     out = []
     for e in errors:
         loc = [str(p) for p in e.get("loc", ()) if p not in ("body", "query", "path")]
@@ -32,6 +45,7 @@ def field_errors(errors: Any) -> list[dict[str, str]]:
 
 
 def _validation(errors: Any) -> JSONResponse:
+    """Битый JSON → 400 bad_request, остальные ошибки валидации → 422."""
     errs = list(errors)
     if any(e.get("type") == "json_invalid" for e in errs):
         return error_response(400, "bad_request", "Invalid JSON body")
@@ -39,6 +53,12 @@ def _validation(errors: Any) -> JSONResponse:
 
 
 def install(app: FastAPI) -> None:
+    """Регистрирует обработчики исключений в приложении.
+
+    Отображение: NotFound→404, UnsupportedFile→415, ExtractionFailed→422, Conflict→409,
+    LLMError/LLMInvalidJSON→502, прочее→500 (наружу только имя класса исключения).
+    """
+
     @app.exception_handler(RequestValidationError)
     async def _rve(_: Request, exc: RequestValidationError) -> JSONResponse:
         return _validation(exc.errors())

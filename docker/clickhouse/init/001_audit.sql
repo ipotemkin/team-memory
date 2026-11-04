@@ -1,5 +1,5 @@
--- Executed by the clickhouse container on first start (compose profile "clickhouse").
--- Same DDL as app.adapters.clickhouse.sink.DDL (also: make ch-migrate).
+-- Выполняется контейнером clickhouse при первом запуске (профиль compose "clickhouse").
+-- Тот же DDL, что app.adapters.clickhouse.sink.DDL (также: make ch-migrate).
 CREATE DATABASE IF NOT EXISTS kb;
 CREATE TABLE IF NOT EXISTS kb.audit_runs
 (

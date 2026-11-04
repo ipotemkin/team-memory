@@ -1,4 +1,8 @@
-"""Deterministic stub adapters (fake LLM/embeddings) for tests and offline runs."""
+"""Детерминированные stub-адаптеры (фейковые LLM и эмбеддинги) для тестов и офлайн-запуска.
+
+Включаются LLM_PROVIDER=stub / EMBEDDINGS_PROVIDER=stub: приложение полностью работает без ключа
+API, а ответы воспроизводимы (одинаковый вход → одинаковый выход).
+"""
 
 import hashlib
 import json
@@ -14,12 +18,18 @@ from app.domain.models import INSUFFICIENT_DATA, AiAnswer
 from app.domain.prompts import split_context
 
 StubMode = Literal["normal", "low_confidence", "invalid_json", "error", "hallucinate"]
+# Граница предложения или перевод строки.
 _SENT = re.compile(r"(?<=[.!?…])\s+|\n+")
+# Цитата, которой заведомо нет в контексте (режим hallucinate → unverified_quote).
 HALLUCINATED_QUOTE = "Эта цитата отсутствует в контексте базы знаний"
 
 
 class StubEmbedder:
-    """Hashing bag-of-words embedder: deterministic, L2-normalized."""
+    """Эмбеддер «мешок слов с хешированием»: детерминированный, L2-нормированный.
+
+    Каждый термин (см. ``memory.retriever.terms``) хешируется в одну из ``dim`` координат; похожие по
+    словам тексты получают близкие векторы, так что гибридный поиск работает и без реальной модели.
+    """
 
     def __init__(self, dim: int = 64, model_name: str = "stub:hash-64") -> None:
         self.dim = dim
@@ -38,9 +48,10 @@ class StubEmbedder:
 
 
 class StubChatLLM:
-    """Extracts best-matching context sentences as verbatim quotes.
+    """Экстрактивная «LLM»: берёт самые подходящие предложения контекста как дословные цитаты.
 
-    mode: normal | low_confidence | invalid_json | error | hallucinate.
+    mode: normal | low_confidence | invalid_json | error | hallucinate — режимы для тестов guardrails
+    (низкая уверенность, битый JSON, недоступность, выдуманная цитата). ``calls`` считает вызовы.
     """
 
     def __init__(
@@ -52,6 +63,12 @@ class StubChatLLM:
         self.calls = 0
 
     async def answer_with_sources(self, question: str, context: str) -> AiAnswer:
+        """Ответ по контексту, проверенный той же схемой ``AiAnswer``, что и у реальной LLM.
+
+        Raises:
+            LLMError: режим error.
+            LLMInvalidJSON: ответ не прошёл схему (режим invalid_json).
+        """
         self.calls += 1
         if self.mode == "error":
             raise LLMError("stub: upstream timeout")
@@ -62,6 +79,11 @@ class StubChatLLM:
             raise LLMInvalidJSON(f"schema validation failed: {exc.error_count()} errors") from exc
 
     def _raw(self, question: str, context: str) -> str:
+        """Формирует «сырой» JSON-ответ.
+
+        Предложения контекста ранжируются по доле терминов вопроса; цитатами становятся до ``max_quotes``
+        лучших с долей ≥ 0.5. Нет таких — «данных недостаточно» с low confidence.
+        """
         if self.mode == "invalid_json":
             return '{"answer": "oops", "sources": "not-a-list", "confidence": "sure"'
         q = terms(question)

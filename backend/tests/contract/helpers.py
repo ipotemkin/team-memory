@@ -1,3 +1,5 @@
+"""Вспомогательные конструкторы документов и фрагментов для контрактных тестов."""
+
 from app.domain.chunking import sha256_text
 from app.domain.models import NewDocument, Snippet
 

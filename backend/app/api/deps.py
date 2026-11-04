@@ -1,4 +1,7 @@
-"""FastAPI dependencies: the composition container lives in app.state (wired in main.py)."""
+"""Зависимости FastAPI: контейнер composition лежит в app.state (подключается в main.py).
+
+Обработчики получают сервисы через ``Depends``, не зная об адаптерах; в тестах контейнер подменяется.
+"""
 
 from typing import Any
 
@@ -11,6 +14,7 @@ from app.services.documents import DocumentService
 from app.services.qa_runs import QaRunService
 
 
+# Контейнер типизирован как Any, чтобы api не импортировал composition (import-linter).
 def _c(request: Request) -> Any:
     return request.app.state.container
 
@@ -41,5 +45,5 @@ def qa_runs(request: Request) -> QaRunService:
 
 
 def mark_audited(request: Request) -> None:
-    """The service wrote its own audit row; the middleware must not add another."""
+    """Сервис сам записал аудит — middleware не должен добавлять вторую запись."""
     request.state.audited = True

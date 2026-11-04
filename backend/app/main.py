@@ -1,4 +1,7 @@
-"""FastAPI entrypoint: composition root -> routers, error handlers, audit, CORS."""
+"""Точка входа FastAPI: composition root → роутеры, обработчики ошибок, аудит, CORS.
+
+``app`` — модуль-уровневое приложение для uvicorn; тесты вызывают ``create_app`` со своим контейнером.
+"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,6 +24,16 @@ def create_app(
     health_service: HealthService | None = None,
     admin_health_service: HealthService | None = None,
 ) -> FastAPI:
+    """Создаёт FastAPI-приложение.
+
+    Args:
+        settings: настройки (по умолчанию из контейнера или окружения).
+        container: готовый контейнер (тесты); тогда логирование, startup и закрытие — на вызывающем.
+        health_service, admin_health_service: подмена health-сервисов (тесты).
+
+    Returns:
+        Настроенное приложение.
+    """
     s = settings or (container.settings if container else get_settings())
     c = container or build_container(s)
     owns = container is None
@@ -30,7 +43,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if owns:
-            await c.run_startup()  # register active embedding model + HNSW index, etc.
+            await c.run_startup()  # регистрация активной модели эмбеддингов + HNSW-индекс и т.п.
         yield
         if owns:
             await c.aclose()
@@ -55,6 +68,8 @@ def create_app(
             body, ctype = metrics.render()
             return Response(body, media_type=ctype)
 
+    # Последний добавленный middleware — внешний: CORS → RequestContext (request_id) → Audit,
+    # поэтому аудит видит request_id, а CORS-заголовки есть и у ответов с ошибкой.
     app.add_middleware(AuditMiddleware, audit=c.audit_service(), max_body_kb=s.AUDIT_MAX_BODY_KB)
     app.add_middleware(RequestContextMiddleware, metrics=metrics)
     app.add_middleware(

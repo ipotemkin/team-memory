@@ -1,4 +1,4 @@
-"""OpenAI-compatible adapters against httpx.MockTransport (no network)."""
+"""OpenAI-совместимые адаптеры на httpx.MockTransport (без сети)."""
 
 import json
 from typing import Any

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Dataset tooling for tests_data/ against a running API (stdlib only).
+"""Инструменты датасета tests_data/ против запущенного API (только стандартная библиотека).
 
-    python3 scripts/kb.py seed             # load tests_data/kb_documents.jsonl, idempotent by title
-    python3 scripts/kb.py eval             # ask kb_questions.jsonl, compare; exit 1 on mismatch
-    python3 scripts/kb.py acceptance --yes # reset app data -> seed -> eval -> audit -> summary
+    python3 scripts/kb.py seed             # загрузить tests_data/kb_documents.jsonl, идемпотентно по
+    title
+    python3 scripts/kb.py eval             # задать вопросы kb_questions.jsonl и сверить; exit 1 при
+    расхождении
+    python3 scripts/kb.py acceptance --yes # сброс данных → seed → eval → аудит → итог по критериям
 
-Env: API_URL (default http://localhost:8000),
-     PSQL (default "docker compose exec -T postgres psql -U kb -d kb"; e.g. "psql postgresql://kb:kb@127.0.0.1:5432/kb").
+Окружение: API_URL (по умолчанию http://localhost:8000),
+     PSQL (по умолчанию "docker compose exec -T postgres psql -U kb -d kb"; напр. "psql
+     postgresql://kb:kb@127.0.0.1:5432/kb").
 """
 
 from __future__ import annotations
@@ -28,12 +31,17 @@ ROOT = Path(__file__).resolve().parents[1]
 API = os.environ.get("API_URL", "http://localhost:8000").rstrip("/")
 PSQL = os.environ.get("PSQL", "docker compose exec -T postgres psql -U kb -d kb")
 WAIT_S = int(os.environ.get("SEED_WAIT_S", "180"))
-# Only data tables of the app schema; app.embedding_models (registry) and alembic_version are kept.
+# Только таблицы данных схемы app; реестр app.embedding_models и alembic_version сохраняются.
 _DATA_TABLES = "app.snippet_embeddings, app.snippets, app.qa_runs, app.documents, app.audit_runs"
 RESET_SQL = f"TRUNCATE {_DATA_TABLES} RESTART IDENTITY CASCADE"
 
 
 def call(method: str, path: str, body: Any = None) -> Any:
+    """HTTP-запрос к API с JSON-телом; ответ — разобранный JSON.
+
+    Raises:
+        SystemExit: HTTP-ошибка или API недоступен (скрипт завершается с понятным сообщением).
+    """
     data = json.dumps(body, ensure_ascii=False).encode() if body is not None else None
     req = urllib.request.Request(
         f"{API}{path}", data=data, method=method, headers={"content-type": "application/json"}
@@ -48,16 +56,19 @@ def call(method: str, path: str, body: Any = None) -> Any:
 
 
 def jsonl(name: str) -> list[dict[str, Any]]:
+    """Строки файла tests_data/<name> в формате JSON Lines."""
     return [json.loads(x) for x in (ROOT / "tests_data" / name).read_text("utf-8").splitlines() if x.strip()]
 
 
 def psql(sql: str) -> list[list[str]]:
+    """Выполняет SQL через команду PSQL; строки результата — списки полей (разделитель TAB)."""
     cmd = [*shlex.split(PSQL), "-tA", "-F", "\t", "-v", "ON_ERROR_STOP=1", "-c", sql]
     out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     return [line.split("\t") for line in out.splitlines() if line]
 
 
 def all_documents() -> list[dict[str, Any]]:
+    """Все документы из API (постранично по 200)."""
     out: list[dict[str, Any]] = []
     while page := call("GET", f"/kb/documents?limit=200&offset={len(out)}"):
         out += page
@@ -70,6 +81,11 @@ def all_documents() -> list[dict[str, Any]]:
 
 
 def seed() -> dict[str, str]:
+    """Добавляет недостающие документы датасета и ждёт, пока все станут ready (не дольше SEED_WAIT_S).
+
+    Returns:
+        Словарь title → document_id.
+    """
     have = {d["title"]: d["id"] for d in all_documents()}
     added = 0
     for d in jsonl("kb_documents.jsonl"):
@@ -96,6 +112,8 @@ def seed() -> dict[str, str]:
 
 @dataclass
 class Row:
+    """Результат одного вопроса eval: ответ, источники, причина ревью, время и найденные расхождения."""
+
     n: int
     q: dict[str, Any]
     needs_review: bool
@@ -107,6 +125,10 @@ class Row:
 
 
 def evaluate() -> list[Row]:
+    """Задаёт все вопросы датасета и сверяет needs_review, источники и причину с ожиданиями.
+
+    Причина берётся из последней записи qa_runs (запросы идут последовательно).
+    """
     titles = {d["id"]: d["title"] for d in all_documents()}
     rows = []
     for n, q in enumerate(jsonl("kb_questions.jsonl"), 1):
@@ -134,6 +156,8 @@ def evaluate() -> list[Row]:
 
 
 def print_eval(rows: list[Row]) -> int:
+    """Печатает таблицу результатов; возвращает число вопросов с расхождениями."""
+
     def yn(b: bool | None) -> str:
         return "-" if b is None else ("да" if b else "НЕТ")
 
@@ -166,6 +190,14 @@ def print_eval(rows: list[Row]) -> int:
 
 
 def acceptance(confirm: bool) -> int:
+    """Полный приёмочный прогон: очистка данных, seed, eval, /ai, проверка аудита и 4 критериев.
+
+    Args:
+        confirm: подтверждение (--yes) — прогон удаляет все данные схемы app.
+
+    Returns:
+        Код выхода: 0 — все критерии пройдены, 1 — нет, 2 — нет подтверждения.
+    """
     if not confirm:
         print(
             "acceptance удалит ВСЕ документы, qa_runs и audit_runs в схеме app.\n"
@@ -232,6 +264,7 @@ def acceptance(confirm: bool) -> int:
 
 
 def main() -> int:
+    """Разбор аргументов CLI и запуск команды."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("seed")

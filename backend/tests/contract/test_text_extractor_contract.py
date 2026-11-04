@@ -1,4 +1,4 @@
-"""Contract of the TextExtractor port: every registered adapter must satisfy it."""
+"""Контракт порта TextExtractor: ему обязан соответствовать каждый зарегистрированный адаптер."""
 
 import pytest
 

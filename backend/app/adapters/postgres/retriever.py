@@ -1,12 +1,13 @@
-"""Postgres retrievers: FTS ('russian') and hybrid FTS + pgvector merged with RRF.
+"""Поиск в Postgres: полнотекстовый (FTS, словарь 'russian') и гибридный FTS + pgvector со слиянием RRF.
 
-FTS score  = share of query lexemes present in the snippet (0..1).
-Vector     = cosine similarity 1 - (embedding <=> q) over the *active* embedding model only,
-             using the partial HNSW index (embedding::vector(dim), WHERE embedding_model = model).
-Merge      = Reciprocal Rank Fusion, sum 1/(rrf_k + rank) → order of results.
-Score      = normalized: max(fts_score, cosine) in 0..1, so a single MIN_SCORE threshold applies
-             to both channels (FTS-only rows keep the FTS share, vector-only rows the cosine).
-Only documents with status='ready' are searched.
+- FTS score = доля лексем вопроса, присутствующих во фрагменте (0..1).
+- Вектор = косинусное сходство ``1 - (embedding <=> q)`` только по *активной* модели эмбеддингов,
+  через частичный HNSW-индекс (``embedding::vector(dim)``, ``WHERE embedding_model = model``).
+- Слияние = Reciprocal Rank Fusion: сумма ``1/(rrf_k + rank)`` по обоим каналам задаёт *порядок*.
+- Score = нормированный ``max(fts_score, cosine)`` в 0..1, поэтому один порог MIN_SCORE применим к обоим
+  каналам (строки только из FTS сохраняют долю лексем, только из векторов — косинус).
+
+Ищем только по документам в статусе 'ready'.
 """
 
 from sqlalchemy import text
@@ -14,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.domain.models import ScoredSnippet
 
+# ql — уникальные лексемы вопроса, qn — их количество, qt — tsquery «лексема1 | лексема2 | ...».
+# score — доля лексем вопроса во фрагменте; rank (ts_rank_cd) — только для упорядочивания при равенстве.
 FTS_SQL = text(
     """
 WITH ql AS (SELECT DISTINCT lexeme FROM unnest(to_tsvector('russian', :q))),
@@ -32,11 +35,16 @@ LIMIT :k
 """
 )
 
+# Размерность модели, только если она активна (векторный поиск по неактивной модели не делаем).
 ACTIVE_DIM_SQL = text("SELECT dim FROM app.embedding_models WHERE name = :m AND status = 'active'")
 
 
 def vector_sql(dim: int) -> str:
-    # literal dim (validated int) so the expression matches the partial HNSW index
+    """SQL векторного канала для модели размерности ``dim``.
+
+    Размерность подставляется литералом (это проверенный int из реестра, не ввод пользователя), чтобы
+    выражение совпало с выражением частичного HNSW-индекса — иначе планировщик индекс не использует.
+    """
     return f"""
 SELECT s.id, s.document_id, s.snippet_text,
        1 - (e.embedding::vector({dim}) <=> CAST(:qv AS vector({dim}))) AS score
@@ -50,12 +58,25 @@ LIMIT :k
 
 
 def _clip(x: float | None) -> float:
+    """Обрезает значение в [0, 1] (None → 0)."""
     return min(1.0, max(0.0, float(x or 0.0)))
 
 
 def rrf_merge(
     fts: list[ScoredSnippet], vec: list[ScoredSnippet], k: int, rrf_k: int = 60
 ) -> list[ScoredSnippet]:
+    """Сливает результаты FTS и векторного поиска методом Reciprocal Rank Fusion.
+
+    RRF учитывает только ранги, поэтому несравнимые шкалы (доля лексем и косинус) не мешают слиянию.
+    Фрагмент, найденный обоими каналами, получает сумму вкладов и поднимается выше. В результате
+    остаётся лучший из двух score фрагмента.
+
+    Args:
+        fts: результаты полнотекстового поиска (по убыванию релевантности).
+        vec: результаты векторного поиска.
+        k: сколько вернуть.
+        rrf_k: константа RRF (обычно 60): чем больше, тем слабее разница между соседними рангами.
+    """
     fused: dict[int, float] = {}
     best: dict[int, ScoredSnippet] = {}
     for lst in (fts, vec):
@@ -68,10 +89,13 @@ def rrf_merge(
 
 
 class PostgresFtsRetriever:
+    """Порт Retriever: только полнотекстовый поиск."""
+
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
 
     async def _fts(self, query: str, k: int) -> list[ScoredSnippet]:
+        """До ``k`` фрагментов по FTS-запросу (лексемы вопроса через OR)."""
         async with self._engine.connect() as conn:
             res = await conn.execute(FTS_SQL, {"q": query, "k": k})
             return [
@@ -93,7 +117,10 @@ class PostgresFtsRetriever:
 
 
 class PostgresHybridRetriever(PostgresFtsRetriever):
-    """FTS when no query vector is given (embedder failed → fts_only), else FTS + vector + RRF."""
+    """FTS, если вектора вопроса нет (эмбеддер упал → fts_only), иначе FTS + вектор + RRF.
+
+    ``candidates`` — во сколько раз больше кандидатов берём из каждого канала, чем нужно вернуть.
+    """
 
     def __init__(self, engine: AsyncEngine, rrf_k: int = 60, candidates: int = 4) -> None:
         super().__init__(engine)
@@ -101,11 +128,17 @@ class PostgresHybridRetriever(PostgresFtsRetriever):
         self._cand = candidates
 
     async def _vector(self, qvec: list[float], model: str, n: int) -> list[ScoredSnippet]:
+        """Векторный канал: ближайшие фрагменты по косинусному расстоянию.
+
+        Пустой результат, если модель не активна или размерность вектора вопроса не совпадает.
+        """
         async with self._engine.connect() as conn:
             dim = (await conn.execute(ACTIVE_DIM_SQL, {"m": model})).scalar_one_or_none()
             if dim is None or int(dim) != len(qvec):
-                return []  # model not active (or dimension mismatch): no vector channel
+                return []  # модель не активна/другая размерность: без векторов
             qv = "[" + ",".join(f"{x:.7g}" for x in qvec) + "]"
+            # ef_search: ширина поиска в HNSW (больше — точнее, но медленнее); действует до конца
+            # транзакции.
             await conn.execute(text("SET LOCAL hnsw.ef_search = 100"))
             res = await conn.execute(text(vector_sql(int(dim))), {"qv": qv, "m": model, "k": n})
             return [

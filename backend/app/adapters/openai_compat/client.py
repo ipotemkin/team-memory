@@ -1,7 +1,7 @@
-"""Minimal async client for OpenAI-compatible APIs (OpenAI, ProxyAPI, vLLM, ...).
+"""Минимальный async-клиент для OpenAI-совместимых API (OpenAI, ProxyAPI, vLLM, Ollama...).
 
-httpx directly instead of the openai SDK: one small dependency, explicit timeouts/retries,
-easy to test with httpx.MockTransport.
+httpx напрямую вместо SDK openai: одна лёгкая зависимость, явные таймауты и ретраи, удобное
+тестирование через ``httpx.MockTransport``.
 """
 
 import asyncio
@@ -14,10 +14,13 @@ import httpx
 from app.domain.errors import LLMError
 
 log = logging.getLogger("app.openai_compat")
+# Коды, при которых повтор имеет смысл: таймаут, конфликт, rate limit, ошибки сервера/прокси.
 RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
 
 
 class ApiStatusError(LLMError):
+    """HTTP-ошибка сервера: код и тело ответа (тело нужно, чтобы распознать неподдержку json_schema)."""
+
     def __init__(self, status: int, body: str) -> None:
         super().__init__(f"HTTP {status}: {body[:300]}")
         self.status = status
@@ -25,6 +28,17 @@ class ApiStatusError(LLMError):
 
 
 class OpenAICompatClient:
+    """HTTP-клиент с Bearer-авторизацией, таймаутами и ретраями.
+
+    Args:
+        base_url: адрес API, например ``https://api.proxyapi.ru/openai/v1``.
+        api_key: ключ (пустой ключ → POST сразу падает с LLMError).
+        timeout_s: общий таймаут запроса (на соединение — не больше 10 с).
+        max_retries: число повторов после первой попытки.
+        backoff_s: базовая задержка экспоненциального backoff.
+        transport: подменный транспорт httpx для тестов.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -44,10 +58,15 @@ class OpenAICompatClient:
         )
 
     async def aclose(self) -> None:
+        """Закрывает HTTP-соединения."""
         await self._http.aclose()
 
     async def get(self, path: str) -> dict[str, Any]:
-        """Single GET without retries (health checks)."""
+        """Один GET без ретраев (для health-проверок).
+
+        Raises:
+            ApiStatusError: ответ с кодом ≥ 400.
+        """
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
         r = await self._http.get(path.lstrip("/"), headers=headers)
         if r.status_code >= 400:
@@ -56,7 +75,12 @@ class OpenAICompatClient:
         return data
 
     async def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """POST with retries on 408/409/429/5xx and network errors (exponential backoff + jitter)."""
+        """POST с ретраями на 408/409/429/5xx и сетевые ошибки (экспоненциальный backoff + jitter).
+
+        Raises:
+            LLMError: нет ключа, сетевая ошибка/таймаут после всех попыток или ответ не JSON.
+            ApiStatusError: неретраибельный код (например, 400/401) или ретраи исчерпаны.
+        """
         if not self._key:
             raise LLMError("OPENAI_API_KEY is not set")
         headers = {"Authorization": f"Bearer {self._key}"}
@@ -78,6 +102,7 @@ class OpenAICompatClient:
                     raise err
             if attempt >= self._max_retries:
                 raise err
+            # Задержка 0.5, 1, 2... с × (1..1.25) — jitter разводит одновременные повторы разных запросов.
             delay = self._backoff * (2**attempt) * (1 + random.random() * 0.25)  # noqa: S311
             log.warning("openai_compat %s failed (%s), retry %d in %.1fs", path, err, attempt + 1, delay)
             await asyncio.sleep(delay)

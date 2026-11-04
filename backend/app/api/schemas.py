@@ -1,4 +1,7 @@
-"""HTTP DTOs (request/response schemas). Limits come from the domain."""
+"""HTTP DTO (схемы запросов и ответов). Ограничения длины берутся из домена (Title, Text, Question).
+
+Докстринги моделей не пишем: pydantic выводит их в описание JSON-схемы (OpenAPI).
+"""
 
 from datetime import datetime
 from typing import Literal
@@ -8,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.domain.models import AiSource, DocumentStatus, Question, ReviewReason, Source, Text, Title
 
 
+# Входные DTO: лишние поля запрещены (опечатка в имени поля → 422).
 class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -27,6 +31,7 @@ class SourceOut(BaseModel):
 
 
 def sources_out(sources: list[Source]) -> list[SourceOut]:
+    """Доменные источники → DTO с ``document_id`` строкой."""
     return [SourceOut(document_id=str(s.document_id), quote=s.quote) for s in sources]
 
 
@@ -63,6 +68,7 @@ class AskOut(BaseModel):
     needs_review: bool
 
 
+# Ответ /ai/answer_with_sources — та же строгая схема, что требуется от LLM.
 class AiAnswerOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
     answer: str
@@ -95,6 +101,7 @@ class ErrorOut(BaseModel):
     detail: str | list[FieldError] | None = None
 
 
+# Общие описания ошибок для responses= в декораторах роутов.
 ERRORS: dict[int | str, dict[str, object]] = {
     400: {"model": ErrorOut, "description": "Invalid JSON body"},
     422: {"model": ErrorOut, "description": "Validation error"},

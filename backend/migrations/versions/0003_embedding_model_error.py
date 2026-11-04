@@ -1,4 +1,4 @@
-"""embedding_models.error + 'failed' status (persisted reindex failures)
+"""embedding_models.error + статус 'failed' (сохранение ошибок переиндексации).
 
 Revision ID: 0003
 Revises: 0002
@@ -13,12 +13,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # ADD VALUE inside a transaction is fine on PG12+ as long as the value is not used in the same transaction
+    # ADD VALUE в транзакции допустим с PG12+, если значение не используется в той же транзакции
     op.execute("ALTER TYPE app.embedding_model_status ADD VALUE IF NOT EXISTS 'failed'")
     op.execute("ALTER TABLE app.embedding_models ADD COLUMN IF NOT EXISTS error TEXT")
 
 
 def downgrade() -> None:
-    # enum values cannot be dropped; map 'failed' back to 'indexing' and drop the column
+    # значения enum удалить нельзя: возвращаем 'failed' в 'indexing' и удаляем колонку
     op.execute("UPDATE app.embedding_models SET status = 'indexing' WHERE status::text = 'failed'")
     op.execute("ALTER TABLE app.embedding_models DROP COLUMN IF EXISTS error")

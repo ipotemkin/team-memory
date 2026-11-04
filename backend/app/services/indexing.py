@@ -1,8 +1,10 @@
-"""IndexingService: chunk -> snippets -> embed -> upsert embeddings -> status ready / failed.
+"""IndexingService — индексация документа: нарезка → фрагменты → эмбеддинги → статус ready/failed.
 
-Runs in the background (Celery task ``index_document``) or inline (tests, QUEUE_BACKEND=inline).
-Embeddings are computed outside the DB transaction; the document becomes ``ready`` only after all
-of its snippets are embedded with the active model, so search never sees half-indexed documents.
+Работает в фоне (Celery-задача ``index_document`` из ``adapters/celery_queue/worker.py``) или сразу
+(в тестах и при QUEUE_BACKEND=inline). Эмбеддинги считаются вне транзакции БД (сетевой вызов может
+быть долгим); документ становится ``ready`` только после того, как все его фрагменты получили
+эмбеддинг активной модели, поэтому поиск никогда не видит наполовину проиндексированный документ
+(Retriever ищет только по документам в статусе ready).
 """
 
 import logging
@@ -14,16 +16,34 @@ from app.domain.models import DocumentStatus, Snippet
 from app.domain.ports import Embedder, UnitOfWork
 
 log = logging.getLogger("app.indexing")
+# Имя Celery-задачи индексации (используется DocumentService при постановке в очередь).
 INDEX_TASK = "index_document"
 
 
 class IndexingService:
+    """Индексирует документы.
+
+    Args:
+        uow_factory: фабрика UnitOfWork.
+        embedder: эмбеддер активной модели; None — только полнотекстовый индекс.
+    """
+
     def __init__(self, uow_factory: Callable[[], UnitOfWork], embedder: Embedder | None) -> None:
         self._uow = uow_factory
         self._embedder = embedder
 
     async def index(self, document_id: int, final_attempt: bool = True) -> DocumentStatus:
-        """Index one document. On error: re-raise for a retry, or mark ``failed`` on the last attempt."""
+        """Индексирует один документ.
+
+        Args:
+            document_id: id документа.
+            final_attempt: последняя ли это попытка Celery. Если нет — ошибка пробрасывается, и Celery
+                повторит задачу с backoff; на последней попытке документ помечается failed с текстом
+                ошибки.
+
+        Returns:
+            Итоговый статус документа (ready или failed). Удалённый документ — failed без исключения.
+        """
         try:
             return await self._index(document_id)
         except NotFound:
@@ -41,6 +61,12 @@ class IndexingService:
             return DocumentStatus.FAILED
 
     async def _index(self, document_id: int) -> DocumentStatus:
+        """Собственно индексация в два шага.
+
+        1. Транзакция: статус indexing, замена фрагментов документа новыми (повторная индексация
+          идемпотентна).
+        2. Вне транзакции — эмбеддинги; затем вторая транзакция: векторы + статус ready.
+        """
         async with self._uow() as uow:
             doc = await uow.documents.get(document_id)
             if doc is None:

@@ -1,1 +1,6 @@
-"""HTTP layer (FastAPI routers, DTOs). Calls services; adapters are wired only in composition.py."""
+"""HTTP-слой (FastAPI-роутеры, DTO) — входящий (driving) адаптер гексагональной архитектуры.
+
+Обработчики вызывают только сервисы; адаптеры подключаются исключительно в ``composition.py``
+(проверяется import-linter). Докстринги обработчиков и pydantic-моделей не пишем: FastAPI выводит их
+в OpenAPI, поэтому пояснения здесь — комментариями.
+"""

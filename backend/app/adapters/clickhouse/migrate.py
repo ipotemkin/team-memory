@@ -1,4 +1,4 @@
-"""Create the ClickHouse audit table:  python -m app.adapters.clickhouse.migrate"""
+"""Создание таблицы аудита в ClickHouse:  python -m app.adapters.clickhouse.migrate"""
 
 import asyncio
 
@@ -7,6 +7,7 @@ from app.config import get_settings
 
 
 def main() -> None:
+    """Создаёт базу и таблицу по настройкам CLICKHOUSE_* и печатает её полное имя."""
     s = get_settings()
     sink = ClickHouseAuditSink(
         s.CLICKHOUSE_HOST,

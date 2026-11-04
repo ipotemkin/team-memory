@@ -1,4 +1,4 @@
-"""Shared integration helpers: env-gated Postgres (migrated once) and S3 fixtures."""
+"""Общие хелперы интеграции: Postgres по переменной окружения (миграции один раз) и фикстуры S3."""
 
 import os
 import uuid

@@ -1,4 +1,5 @@
-"""Domain layer: entities, value objects, ports (Protocols).
+"""Доменный слой гексагональной архитектуры: сущности, value-объекты и порты (Protocol).
 
-Pure Python; imports nothing from services/api/adapters.
+Чистый Python: ничего не импортирует из services/api/adapters (это проверяет import-linter).
+Сервисы зависят только от домена; адаптеры реализуют порты из ``ports.py``.
 """

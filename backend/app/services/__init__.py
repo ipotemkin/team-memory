@@ -1,1 +1,6 @@
-"""Application services (use cases). Depend only on domain ports; never import adapters."""
+"""Слой сервисов (прикладная логика, use cases).
+
+Сервисы оркестрируют доменные функции и работают с инфраструктурой только через порты
+(``domain/ports.py``). Конкретные адаптеры им передаёт ``composition.py``; API и Celery-воркер
+вызывают сервисы, а не адаптеры напрямую.
+"""

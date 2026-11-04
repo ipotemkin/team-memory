@@ -1,4 +1,6 @@
-"""Blue/green reindex against real Postgres: new model with another dimension, HNSW, atomic switch."""
+"""Blue/green-переиндексация на реальном Postgres: новая модель другой размерности, HNSW, атомарное
+переключение.
+"""
 
 from collections.abc import AsyncIterator
 from typing import Any

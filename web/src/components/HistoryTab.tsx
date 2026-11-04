@@ -1,3 +1,4 @@
+// Вкладка «История»: журнал вопросов (qa_runs) с фильтром «требует проверки» и карточкой запроса.
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { QaRun } from "../api/types";
@@ -8,6 +9,7 @@ import { Modal } from "./Modal";
 import { SourcesList } from "./Sources";
 import { useToast } from "./Toasts";
 
+/** Карточка запроса: берём из уже загруженного списка (`cached`), иначе загружаем по id (прямая ссылка). */
 export function RunCard({ id, cached, onClose }: { id: string; cached?: QaRun; onClose: () => void }) {
   const toast = useToast();
   const [run, setRun] = useState<QaRun | null>(cached ?? null);
@@ -43,6 +45,7 @@ export function RunCard({ id, cached, onClose }: { id: string; cached?: QaRun; o
   );
 }
 
+/** Список запросов; `runId` из маршрута открывает карточку. */
 export function HistoryTab({ runId, active }: { runId: string | null; active: boolean }) {
   const toast = useToast();
   const [runs, setRuns] = useState<QaRun[] | null>(null);
@@ -103,6 +106,7 @@ export function HistoryTab({ runId, active }: { runId: string | null; active: bo
                 tabIndex={0}
                 aria-label={`Открыть запрос: ${r.question}`}
                 onClick={() => navigate(hrefs.run(r.id))}
+                // Строка таблицы — ссылка: открывается и с клавиатуры (Enter/пробел).
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();

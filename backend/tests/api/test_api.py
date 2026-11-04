@@ -1,4 +1,4 @@
-"""HTTP API on the memory backend: every endpoint, error bodies, spec scenarios, audit rows."""
+"""HTTP API на memory-бэкенде: все эндпоинты, тела ошибок, сценарии ТЗ, записи аудита."""
 
 from collections.abc import Callable
 from typing import Any

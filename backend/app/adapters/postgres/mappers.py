@@ -1,4 +1,7 @@
-"""ORM/Core rows <-> domain models."""
+"""Преобразование строк ORM/Core ↔ доменные модели.
+
+Держит доменные модели независимыми от SQLAlchemy: репозитории возвращают только доменные объекты.
+"""
 
 from typing import Any
 
@@ -7,6 +10,7 @@ from app.domain.models import AuditRecord, Document, DocumentStatus, QaRun, Revi
 
 
 def document_to_domain(r: DocumentRow) -> Document:
+    """Строка documents → ``Document`` (sha-колонки CHAR дополняются пробелами — обрезаем)."""
     return Document(
         id=r.id,
         title=r.title,
@@ -25,6 +29,7 @@ def document_to_domain(r: DocumentRow) -> Document:
 
 
 def snippet_from_row(m: Any) -> Snippet:
+    """Строка snippets (mapping из Core-запроса) → ``Snippet``."""
     return Snippet(
         id=m["id"],
         document_id=m["document_id"],
@@ -37,6 +42,7 @@ def snippet_from_row(m: Any) -> Snippet:
 
 
 def qa_run_to_row(run: QaRun) -> QaRunRow:
+    """``QaRun`` → новая ORM-строка qa_runs (источники — JSONB)."""
     return QaRunRow(
         created_at=run.created_at,
         question=run.question,
@@ -53,6 +59,7 @@ def qa_run_to_row(run: QaRun) -> QaRunRow:
 
 
 def qa_run_to_domain(r: QaRunRow) -> QaRun:
+    """ORM-строка qa_runs → ``QaRun``."""
     return QaRun(
         id=r.id,
         created_at=r.created_at,
@@ -70,6 +77,7 @@ def qa_run_to_domain(r: QaRunRow) -> QaRun:
 
 
 def audit_to_row(rec: AuditRecord) -> AuditRunRow:
+    """``AuditRecord`` → ORM-строка audit_runs."""
     return AuditRunRow(
         created_at=rec.created_at,
         action=rec.action,

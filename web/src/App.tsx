@@ -1,3 +1,4 @@
+// Корневой компонент: шапка с вкладками, вкладки разделов и карточка документа поверх текущей вкладки.
 import { useCallback, useRef } from "react";
 import { AdminTab } from "./components/AdminTab";
 import { AskTab } from "./components/AskTab";
@@ -7,6 +8,7 @@ import { HistoryTab } from "./components/HistoryTab";
 import { ToastProvider } from "./components/Toasts";
 import { hrefs, navigate, useRoute, type TabId } from "./router";
 
+// Вкладки и их адреса (hash-маршруты).
 const TABS: { id: TabId; label: string; href: string }[] = [
   { id: "documents", label: "Документы", href: hrefs.documents },
   { id: "ask", label: "Вопросы", href: hrefs.ask },
@@ -14,6 +16,7 @@ const TABS: { id: TabId; label: string; href: string }[] = [
   { id: "admin", label: "Админ", href: hrefs.admin },
 ];
 
+/** Оболочка приложения: провайдер уведомлений, навигация, вкладки. */
 export default function App() {
   const route = useRoute();
   // Документ открывается поверх вкладки, с которой перешли; закрытие возвращает назад.
@@ -21,6 +24,7 @@ export default function App() {
   if (!route.documentId)
     lastTab.current =
       TABS.find((t) => t.id === route.tab)?.href ?? hrefs.documents;
+  // Пока открыт документ, подсвечиваем вкладку, с которой на него перешли.
   const active: TabId =
     route.documentId && lastTab.current !== hrefs.documents
       ? (TABS.find((t) => t.href === lastTab.current)?.id ?? "documents")

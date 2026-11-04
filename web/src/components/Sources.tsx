@@ -1,6 +1,8 @@
+// Список источников ответа: дословная цитата и ссылка на документ.
 import type { Source } from "../api/types";
 import { hrefs } from "../router";
 
+/** Источники ответа; ключ включает индекс — из одного документа может быть несколько цитат. */
 export function SourcesList({ sources }: { sources: Source[] }) {
   if (sources.length === 0) return <p className="muted">Источники не найдены.</p>;
   return (

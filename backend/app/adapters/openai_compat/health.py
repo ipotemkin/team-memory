@@ -1,10 +1,15 @@
-"""Health probe for an OpenAI-compatible endpoint (OpenAI/ProxyAPI/Ollama): GET /models."""
+"""Проба OpenAI-совместимого сервера (OpenAI/ProxyAPI/Ollama): ``GET /models``."""
 
 from app.adapters.openai_compat.client import OpenAICompatClient
 from app.domain.health import ComponentStatus
 
 
 class OpenAICompatProbe:
+    """Проверяет, что сервер отвечает и (если отдаёт список моделей) обслуживает нужную модель.
+
+    У Ollama имя может приходить с суффиксом ``:latest`` — это тоже считается совпадением.
+    """
+
     def __init__(self, name: str, client: OpenAICompatClient, model: str) -> None:
         self.name = name
         self._c = client

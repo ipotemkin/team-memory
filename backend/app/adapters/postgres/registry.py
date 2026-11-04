@@ -1,4 +1,8 @@
-"""Postgres embedding-model registry (app.embedding_models + app.snippet_embeddings)."""
+"""Реестр моделей эмбеддингов в Postgres (``app.embedding_models`` + ``app.snippet_embeddings``).
+
+Реализует порт EmbeddingModelRegistry для blue/green-переиндексации: регистрация, прогресс,
+покрытие, атомарная активация и удаление данных модели вместе с её HNSW-индексом.
+"""
 
 from typing import Any
 
@@ -17,16 +21,20 @@ _COLS = (
 
 
 def _info(row: Any) -> EmbeddingModelInfo:
+    """Строка реестра → ``EmbeddingModelInfo``."""
     return EmbeddingModelInfo(**dict(row))
 
 
 def index_name(model: str) -> str:
+    """Имя HNSW-индекса модели; совпадает с тем, что генерирует SQL-функция ``app.hnsw_index_ddl`` (md5)."""
     import hashlib
 
-    return "ix_snip_emb_hnsw_" + hashlib.md5(model.encode()).hexdigest()[:12]  # noqa: S324 - matches SQL md5()
+    return "ix_snip_emb_hnsw_" + hashlib.md5(model.encode()).hexdigest()[:12]  # noqa: S324 - как md5() в SQL
 
 
 class PostgresEmbeddingRegistry:
+    """Порт EmbeddingModelRegistry поверх Postgres."""
+
     def __init__(self, engine: AsyncEngine) -> None:
         self._e = engine
 
@@ -50,6 +58,11 @@ class PostgresEmbeddingRegistry:
             return _info(row) if row else None
 
     async def register(self, name: str, provider: str, dim: int) -> EmbeddingModelInfo:
+        """Регистрирует модель (status=indexing).
+
+        Raises:
+            Conflict: имя занято (нарушение PK).
+        """
         try:
             async with self._e.begin() as c:
                 await c.execute(
@@ -83,6 +96,11 @@ class PostgresEmbeddingRegistry:
         return str(act)
 
     async def _update(self, sql: str, params: dict[str, Any]) -> None:
+        """Выполняет UPDATE одной модели.
+
+        Raises:
+            NotFound: не обновлено ни одной строки.
+        """
         async with self._e.begin() as c:
             res = await c.execute(text(sql), params)
             if not getattr(res, "rowcount", 1):
@@ -102,6 +120,7 @@ class PostgresEmbeddingRegistry:
         )
 
     async def coverage(self, name: str) -> tuple[int, int]:
+        """(фрагменты с эмбеддингом этой модели для текущей версии текста, всего фрагментов)."""
         async with self._e.connect() as c:
             row = (
                 await c.execute(
@@ -116,7 +135,13 @@ class PostgresEmbeddingRegistry:
         return int(row[0]), int(row[1])
 
     async def activate(self, name: str) -> None:
-        async with self._e.begin() as c:  # one transaction: readers see either the old or the new model
+        """Атомарно делает модель активной, а прежнюю активную — retired.
+
+        Advisory-lock сериализует параллельные активации, а одна транзакция гарантирует, что читатели
+        видят
+        ровно одну активную модель (есть и уникальный частичный индекс по status='active').
+        """
+        async with self._e.begin() as c:  # одна транзакция: видна старая или новая модель
             await c.execute(text("SELECT pg_advisory_xact_lock(hashtext('app.embedding_models.activate'))"))
             exists = (
                 await c.execute(
@@ -140,6 +165,12 @@ class PostgresEmbeddingRegistry:
             )
 
     async def delete(self, name: str) -> int:
+        """Удаляет эмбеддинги и строку реестра (в транзакции), затем HNSW-индекс (CONCURRENTLY).
+
+        Raises:
+            NotFound: модели нет.
+            Conflict: модель активна.
+        """
         async with self._e.begin() as c:
             st = (
                 await c.execute(
@@ -162,4 +193,5 @@ class PostgresEmbeddingRegistry:
         return n
 
     async def ensure_index(self, name: str) -> None:
+        """Создаёт HNSW-индекс модели, если его нет."""
         await create_hnsw_index(self._e, name)

@@ -1,3 +1,4 @@
+// Бейджи статуса документа и «требует проверки».
 import type { DocumentStatus } from "../api/types";
 
 const LABELS: Record<DocumentStatus, string> = {
@@ -6,6 +7,7 @@ const LABELS: Record<DocumentStatus, string> = {
   failed: "ошибка",
 };
 
+/** Статус документа; для failed причина в подсказке и в тексте для скринридеров. */
 export function StatusBadge({ status, error }: { status: DocumentStatus; error?: string | null }) {
   const title = status === "failed" && error ? error : undefined;
   return (
@@ -16,6 +18,7 @@ export function StatusBadge({ status, error }: { status: DocumentStatus; error?:
   );
 }
 
+/** Бейдж ответа, требующего ручной проверки (needs_review). */
 export function ReviewBadge() {
   return <span className="badge review">требует проверки</span>;
 }

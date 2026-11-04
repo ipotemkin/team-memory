@@ -1,4 +1,7 @@
+# Локальный стек: Postgres+pgvector, MinIO (оригиналы файлов), Redis (очередь Celery), API, воркер, beat, веб.
+# Профили: test (api-test — интеграционные тесты), clickhouse (аудит), ollama (локальные модели).
 services:
+  # Postgres 16 с pgvector; init-скрипты из docker/postgres/init выполняются при первом создании тома.
   postgres:
     image: pgvector/pgvector:pg16
     environment: {POSTGRES_USER: kb, POSTGRES_PASSWORD: kb, POSTGRES_DB: kb}
@@ -12,6 +15,7 @@ services:
       timeout: 3s
       retries: 20
 
+  # S3-совместимое хранилище; наружу 9100 (API) и 9101 (консоль), чтобы не конфликтовать с портом 9000.
   minio:
     image: pgsty/minio:latest
     command: server /data --console-address ":9001"
@@ -24,6 +28,7 @@ services:
       timeout: 3s
       retries: 20
 
+  # Одноразовый контейнер: создаёт бакет documents и завершается (от него зависят api и worker).
   minio-init:
     image: pgsty/mc:latest
     depends_on: {minio: {condition: service_healthy}}
@@ -32,6 +37,7 @@ services:
       mc mb --ignore-existing local/documents && echo bucket ready"
     restart: "no"
 
+  # Брокер и backend результатов Celery.
   redis:
     image: redis:7
     ports: ["6379:6379"]
@@ -41,6 +47,7 @@ services:
       timeout: 3s
       retries: 20
 
+  # FastAPI (uvicorn); healthcheck — /health/live.
   api:
     build: ./backend
     env_file: .env
@@ -55,6 +62,7 @@ services:
       timeout: 3s
       retries: 10
 
+  # Celery-воркер: индексация документов и переиндексация моделей; healthcheck — inspect ping.
   worker:
     build: ./backend
     env_file: .env
@@ -69,12 +77,14 @@ services:
       timeout: 15s
       retries: 5
 
+  # Celery beat: периодические задачи (партиции аудита); файл расписания в /tmp — без тома.
   beat:
     build: ./backend
     env_file: .env
     command: celery -A app.adapters.celery_queue.worker:celery_app beat --loglevel=info --schedule /tmp/celerybeat-schedule
     depends_on: {redis: {condition: service_healthy}}
 
+  # Веб-клиент в режиме разработки (Vite); node_modules в отдельном томе, а не в исходниках хоста.
   web:
     image: node:20-alpine
     working_dir: /web
@@ -88,6 +98,8 @@ services:
       timeout: 3s
       retries: 20
 
+  # Интеграционные тесты в контейнере: образ с dev-зависимостями (UV_SYNC_ARGS=""), код монтируется
+  # только на чтение; база kb_test создаётся `make test-db`.
   api-test:
     profiles: ["test"]
     build:
@@ -105,13 +117,14 @@ services:
       - ./backend/tests:/app/tests:ro
       - ./backend/migrations:/app/migrations:ro
       - ./tests_data:/tests_data:ro
+    # $$ — экранирование для compose: переменная подставляется уже внутри контейнера.
     command: sh -c "DB_URL=$$TEST_DATABASE_URL alembic upgrade head && pytest -q -p no:cacheprovider"
     depends_on:
       postgres: {condition: service_healthy}
       minio-init: {condition: service_completed_successfully}
 
-  # Stage 8: ClickHouse audit sink (AUDIT_BACKEND=clickhouse|both). Host ports 8124 (HTTP) / 9002 (native)
-  # so they do not clash with a ClickHouse already running on the host (9000).
+  # Этап 8: приёмник аудита ClickHouse (AUDIT_BACKEND=clickhouse|both). Порты хоста 8124 (HTTP) / 9002 (native),
+  # чтобы не конфликтовать с ClickHouse, уже запущенным на хосте (9000).
   clickhouse:
     profiles: ["clickhouse"]
     image: clickhouse/clickhouse-server:24.8
@@ -121,6 +134,7 @@ services:
       CLICKHOUSE_PASSWORD: kb
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports: ["8124:8123", "9002:9000"]
+    # ClickHouse требует высокий лимит открытых файлов.
     ulimits: {nofile: {soft: 262144, hard: 262144}}
     volumes:
       - chdata:/var/lib/clickhouse
@@ -131,7 +145,7 @@ services:
       timeout: 3s
       retries: 30
 
-  # Stage 8: local LLM + embeddings via Ollama's OpenAI-compatible API (http://ollama:11434/v1).
+  # Этап 8: локальные LLM и эмбеддинги через OpenAI-совместимый API Ollama (http://ollama:11434/v1).
   ollama:
     profiles: ["ollama"]
     image: ollama/ollama:latest

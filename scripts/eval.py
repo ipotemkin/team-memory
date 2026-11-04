@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Run tests_data/kb_questions.jsonl against a running API and compare needs_review with expectations.
+"""Прогоняет tests_data/kb_questions.jsonl против запущенного API и сверяет needs_review с ожиданиями.
 
-    python3 scripts/eval.py                 # API_URL=http://localhost:8000, seeds tests_data docs once
-    python3 scripts/eval.py --no-seed       # use the documents already in the KB
-Use it to retune MIN_SCORE after switching to real embeddings (EMBEDDINGS_PROVIDER=openai_compat).
-Exit code 1 if any question deviates from the expectation.
+    python3 scripts/eval.py                 # API_URL=http://localhost:8000, один раз загружает документы
+    tests_data
+    python3 scripts/eval.py --no-seed       # использовать документы, уже лежащие в базе
+Нужен для подбора MIN_SCORE после перехода на реальные эмбеддинги (EMBEDDINGS_PROVIDER=openai_compat).
+Код выхода 1, если хоть один вопрос разошёлся с ожиданием.
+
+Примечание: скрипт читает старые поля датасета (answerable, expected_doc, id); для текущего формата
+tests_data используйте ``scripts/kb.py eval``.
 """
 
 import argparse
@@ -21,6 +25,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def call(method: str, url: str, body: Any = None) -> Any:
+    """HTTP-запрос с JSON-телом; ответ — разобранный JSON.
+
+    Raises:
+        SystemExit: HTTP-ошибка.
+    """
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={"content-type": "application/json"})
     try:
@@ -31,17 +40,19 @@ def call(method: str, url: str, body: Any = None) -> Any:
 
 
 def jsonl(name: str) -> list[dict[str, Any]]:
+    """Строки файла tests_data/<name> в формате JSON Lines."""
     return [json.loads(x) for x in (ROOT / "tests_data" / name).read_text("utf-8").splitlines() if x.strip()]
 
 
 def seed(api: str) -> None:
+    """Добавляет недостающие документы датасета и ждёт окончания фоновой индексации (до 120 с)."""
     have = {d["title"] for d in call("GET", f"{api}/kb/documents?limit=200")}
     ids = []
     for d in jsonl("kb_documents.jsonl"):
         if d["title"] not in have:
             ids.append(call("POST", f"{api}/kb/documents", {"title": d["title"], "text": d["text"]})["document_id"])
     deadline = time.time() + 120
-    for i in ids:  # wait for background indexing
+    for i in ids:  # ждём фоновую индексацию
         while (st := call("GET", f"{api}/kb/documents/{i}?lines=1")["status"]) == "indexing":
             if time.time() > deadline:
                 raise SystemExit(f"document {i} still indexing after 120s (is the worker running?)")
@@ -52,6 +63,7 @@ def seed(api: str) -> None:
 
 
 def main() -> int:
+    """Прогон вопросов и печать таблицы; возвращает код выхода."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--api", default=os.environ.get("API_URL", "http://localhost:8000"))
     ap.add_argument("--no-seed", action="store_true")

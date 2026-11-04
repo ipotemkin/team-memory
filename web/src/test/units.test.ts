@@ -1,3 +1,4 @@
+// Юнит-тесты утилит: роутер, валидация, тексты ошибок.
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
 import { validateDocument } from "../components/DocumentsTab";

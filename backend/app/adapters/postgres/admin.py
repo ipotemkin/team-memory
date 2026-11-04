@@ -1,11 +1,24 @@
-"""Admin helpers: per-model partial HNSW index and audit partitions."""
+"""Служебные операции над схемой: частичный HNSW-индекс модели эмбеддингов и партиции аудита.
+
+DDL генерируют SQL-функции из миграции 0002 (``app.hnsw_index_ddl``, ``app.ensure_audit_partitions``),
+здесь они только вызываются.
+"""
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 async def create_hnsw_index(engine: AsyncEngine, model: str) -> str:
-    """Create the partial HNSW index for a registered model (CONCURRENTLY, outside a transaction)."""
+    """Создаёт частичный HNSW-индекс для модели (CONCURRENTLY, вне транзакции).
+
+    Индекс строится по выражению ``embedding::vector(dim)`` с условием ``WHERE embedding_model = model``:
+    у каждой модели своя размерность, а одна колонка ``vector`` без размерности хранит векторы всех
+    моделей.
+    CREATE INDEX CONCURRENTLY нельзя выполнять в транзакции, поэтому используется AUTOCOMMIT.
+
+    Returns:
+        Выполненный DDL (для логов).
+    """
     async with engine.connect() as conn:
         ddl = (await conn.execute(text("SELECT app.hnsw_index_ddl(:m)"), {"m": model})).scalar_one()
     async with engine.connect() as conn:
@@ -15,6 +28,10 @@ async def create_hnsw_index(engine: AsyncEngine, model: str) -> str:
 
 
 async def ensure_audit_partitions(engine: AsyncEngine, months_ahead: int = 2) -> int:
+    """Создаёт месячные партиции ``app.audit_runs`` на ``months_ahead`` месяцев вперёд.
+
+    Вызывается при старте и периодически Celery beat. Возвращает число созданных партиций.
+    """
     async with engine.begin() as conn:
         n = (
             await conn.execute(text("SELECT app.ensure_audit_partitions(:n)"), {"n": months_ahead})
@@ -23,10 +40,10 @@ async def ensure_audit_partitions(engine: AsyncEngine, months_ahead: int = 2) ->
 
 
 async def bootstrap_embedding_model(engine: AsyncEngine, name: str, provider: str, dim: int) -> str:
-    """Register the configured embedding model, make it active if none is, ensure its HNSW index.
+    """Регистрирует модель из настроек, делает её активной, если активной нет, и создаёт её HNSW-индекс.
 
-    Returns the active model name. If another model is active, it is left alone (re-index
-    and switch-over is an explicit admin operation) and its index is ensured instead.
+    Возвращает имя активной модели. Если активна другая модель, она не трогается (переиндексация и
+    переключение — явная операция администратора), а индекс создаётся для неё.
     """
     async with engine.begin() as conn:
         await conn.execute(

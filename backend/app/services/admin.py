@@ -1,8 +1,11 @@
-"""AdminService: embedding-model registry operations and blue/green reindex.
+"""AdminService — реестр моделей эмбеддингов и blue/green-переиндексация (эндпоинты ``/admin``).
 
-Flow: register (status=indexing) -> reindex (background task, progress in the registry; status=ready)
--> activate (final catch-up pass, coverage check, atomic switch; previous model -> retired)
--> delete inactive model data.
+Поток: register (status=indexing) → reindex (фоновая задача, прогресс в реестре; затем status=ready)
+→ activate (финальный догоняющий проход, проверка покрытия, атомарное переключение; прежняя модель
+→ retired) → delete (удаление данных неактивной модели).
+
+Пока новая модель считается, поиск продолжает работать на старой активной модели — пользователи
+не замечают переиндексацию («blue/green»).
 """
 
 import logging
@@ -13,10 +16,23 @@ from app.domain.models import EMBEDDING_DIM_MAX, EMBEDDING_ERROR_MAX, EmbeddingM
 from app.domain.ports import Embedder, EmbeddingModelRegistry, TaskQueue, UnitOfWork
 
 log = logging.getLogger("app.admin")
+# Имя Celery-задачи переиндексации модели.
 REINDEX_MODEL_TASK = "reindex_embedding_model"
 
 
 class AdminService:
+    """Операции администратора над моделями эмбеддингов.
+
+    Args:
+        registry: реестр моделей (порт EmbeddingModelRegistry).
+        uow_factory: фабрика UnitOfWork (чтение фрагментов, запись эмбеддингов).
+        embedder_for: фабрика эмбеддера по описанию модели.
+        queue: очередь для фоновой задачи переиндексации.
+        default: модель из настроек (EMBEDDINGS_MODEL) — регистрируется при первом обращении.
+        batch_size: размер пачки фрагментов на один вызов эмбеддера (REINDEX_BATCH_SIZE).
+        on_switch: колбэк после смены активной модели (сбрасывает кеш ActiveEmbedder).
+    """
+
     def __init__(
         self,
         registry: EmbeddingModelRegistry,
@@ -36,19 +52,32 @@ class AdminService:
         self._on_switch = on_switch
 
     async def _bootstrap(self) -> None:
+        """Гарантирует, что модель по умолчанию зарегистрирована и есть активная модель."""
         await self._reg.bootstrap(self._default.name, self._default.provider, self._default.dim)
 
     async def list_models(self) -> list[EmbeddingModelInfo]:
+        """Все модели реестра."""
         await self._bootstrap()
         return await self._reg.list()
 
     async def get(self, name: str) -> EmbeddingModelInfo:
+        """Модель по имени.
+
+        Raises:
+            NotFound: модели нет.
+        """
         info = await self._reg.get(name)
         if info is None:
             raise NotFound(f"embedding model {name!r}")
         return info
 
     async def register(self, name: str, provider: str, dim: int) -> EmbeddingModelInfo:
+        """Регистрирует новую модель (status=indexing).
+
+        Raises:
+            ValueError: пустые имя/провайдер или dim вне (0, 4000] (API отдаёт 422).
+            Conflict: модель уже зарегистрирована (409).
+        """
         name, provider = name.strip(), provider.strip()
         if not name or not provider or not 0 < dim <= EMBEDDING_DIM_MAX:
             raise ValueError("name, provider and 0 < dim <= 4000 are required")
@@ -56,16 +85,31 @@ class AdminService:
         return await self._reg.register(name, provider, dim)
 
     async def start_reindex(self, name: str) -> str:
+        """Ставит фоновую переиндексацию модели и возвращает id задачи.
+
+        Повторный запуск для retired/ready/failed возвращает модель в indexing и стирает прошлую ошибку;
+        активная модель остаётся активной (догоняющая переиндексация).
+        """
         info = await self.get(name)
         if info.status in ("retired", "ready", "failed") or info.error:
-            # restart: back to indexing and clear a previous failure (active stays active)
+            # Перезапуск: обратно в indexing и сброс прошлой ошибки (активная остаётся active).
             await self._reg.set_status(name, "indexing" if info.status != "active" else "active")
         done, total = await self._reg.coverage(name)
         await self._reg.set_progress(name, done, total)
         return await self._queue.enqueue(REINDEX_MODEL_TASK, name=name)
 
     async def reindex(self, name: str, max_batches: int = 1_000_000) -> int:
-        """Embed every snippet missing an up-to-date embedding of ``name``. Returns embedded count."""
+        """Считает эмбеддинги для всех фрагментов без актуального вектора модели ``name``.
+
+        Работает пачками по ``batch_size``, после каждой пачки обновляет прогресс в реестре. В конце
+        создаёт векторный индекс и, если всё покрыто, переводит модель из indexing в ready.
+
+        Returns:
+            Сколько фрагментов получили эмбеддинг.
+
+        Raises:
+            Conflict: эмбеддер вернул векторы не той размерности.
+        """
         info = await self.get(name)
         embedder = self._embedder_for(info)
         n = 0
@@ -75,6 +119,7 @@ class AdminService:
             if not missing:
                 break
             vecs = await embedder.embed([s.text for s in missing])
+            # Защита от неверно указанного dim: такие векторы не влезут в колонку vector(dim).
             if any(len(v) != info.dim for v in vecs):
                 raise Conflict(f"embedder returned vectors of wrong dimension for {name!r} (dim={info.dim})")
             items = [(s.id or 0, s.text_sha256, v) for s, v in zip(missing, vecs, strict=True)]
@@ -94,8 +139,11 @@ class AdminService:
         return n
 
     async def run_reindex_task(self, name: str) -> int:
-        """Background-task entry point: like reindex(), but a failure is persisted in the registry
-        (status='failed' unless the model is active, error message truncated) and re-raised."""
+        """Точка входа фоновой задачи: как reindex(), но сбой сохраняется в реестре.
+
+        Модель получает status=failed (активная остаётся active) и текст ошибки (обрезан до
+        EMBEDDING_ERROR_MAX); исключение затем пробрасывается дальше, чтобы задача считалась упавшей.
+        """
         try:
             return await self.reindex(name)
         except Exception as e:
@@ -106,17 +154,25 @@ class AdminService:
                 if current is not None:
                     status = "active" if current.status == "active" else "failed"
                     await self._reg.set_status(name, status, msg)
-            except Exception:  # noqa: BLE001 - never mask the original error
+            except Exception:  # noqa: BLE001 - не маскируем исходную ошибку
                 log.exception("could not persist reindex failure for %s", name)
             raise
 
     async def activate(self, name: str) -> EmbeddingModelInfo:
+        """Делает модель активной (blue/green-переключение).
+
+        Сначала догоняющий reindex (документы, добавленные после окончания переиндексации), затем
+        проверка, что покрыты все фрагменты, и атомарное переключение в реестре.
+
+        Raises:
+            Conflict: модель не в статусе ready или покрыты не все фрагменты.
+        """
         info = await self.get(name)
         if info.status == "active":
             return info
         if info.status != "ready":
             raise Conflict(f"model {name!r} is {info.status!r}; run reindex until it is 'ready'")
-        await self.reindex(name)  # catch up documents indexed after the reindex finished
+        await self.reindex(name)  # догоняем документы, проиндексированные после reindex
         done, total = await self._reg.coverage(name)
         if done < total:
             raise Conflict(f"model {name!r} covers {done}/{total} snippets; reindex again")
@@ -126,6 +182,12 @@ class AdminService:
         return await self.get(name)
 
     async def delete(self, name: str) -> int:
+        """Удаляет неактивную модель вместе с её эмбеддингами и индексом; возвращает число удалённых
+        векторов.
+
+        Raises:
+            Conflict: попытка удалить активную модель.
+        """
         info = await self.get(name)
         if info.status == "active":
             raise Conflict("the active model cannot be deleted; activate another one first")

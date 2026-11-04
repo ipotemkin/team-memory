@@ -1,4 +1,4 @@
-"""MinIO / S3 reachability probe."""
+"""Проба доступности MinIO / S3 (``HEAD bucket``) для ``/admin/health``."""
 
 import asyncio
 
@@ -9,6 +9,8 @@ from app.domain.health import ComponentStatus
 
 
 class S3Probe:
+    """Порт HealthProbe для S3: короткие таймауты и без ретраев, чтобы health отвечал быстро."""
+
     name = "minio"
 
     def __init__(self, endpoint: str, key: str, secret: str, bucket: str, region: str) -> None:

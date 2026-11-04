@@ -1,3 +1,5 @@
+// HTTP-клиент API базы знаний: единая обработка ошибок ({error, detail} → ApiError) и
+// типизированные методы для публичного API (/kb) и админки (/admin). Компоненты ходят на сервер только через него.
 import type {
   AskResponse,
   CreateDocumentResponse,
@@ -10,10 +12,12 @@ import type {
   QaRun,
 } from "./types";
 
+/** Базовый адрес API (VITE_API_URL при сборке), без завершающих слэшей. */
 export const API_URL: string = (
   (import.meta.env.VITE_API_URL as string | undefined) || "http://localhost:8000"
 ).replace(/\/+$/, "");
 
+/** Ошибка ответа API: HTTP-статус, машинный код (`error`) и `detail` из единого тела ошибки бэкенда. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -30,6 +34,7 @@ export class ApiError extends Error {
     if (Array.isArray(this.detail)) {
       for (const item of this.detail as FieldError[]) {
         if (item && typeof item.field === "string") {
+          // Берём последний сегмент пути поля (`body.title` → `title`), сообщения одного поля склеиваем.
           const key = item.field.split(".").pop() ?? item.field;
           out[key] = out[key] ? `${out[key]}; ${item.msg}` : item.msg;
         }
@@ -39,8 +44,10 @@ export class ApiError extends Error {
   }
 }
 
+/** Сервер недоступен (fetch упал до получения ответа: сеть, CORS, адрес). */
 export class NetworkError extends Error {}
 
+// Человекочитаемые сообщения для кодов ошибок бэкенда (app/api/errors.py).
 const CODE_MESSAGES: Record<string, string> = {
   bad_request: "Некорректный запрос",
   validation_error: "Ошибка валидации",
@@ -55,12 +62,17 @@ const CODE_MESSAGES: Record<string, string> = {
   internal_error: "Внутренняя ошибка сервера",
 };
 
+// Текст ошибки для пользователя: сообщение по коду + строковый detail, если он есть.
 function describe(code: string, detail: unknown): string {
   const base = CODE_MESSAGES[code] ?? `Ошибка API (${code})`;
   if (typeof detail === "string" && detail) return `${base}: ${detail}`;
   return base;
 }
 
+/**
+ * Выполняет запрос и разбирает JSON.
+ * Неуспешный ответ → ApiError (если тело не JSON — код `http_<статус>`), сбой сети → NetworkError.
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let resp: Response;
   try {
@@ -81,6 +93,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await resp.json()) as T;
 }
 
+// Параметры POST-запроса с JSON-телом.
 function json(body: unknown): RequestInit {
   return {
     method: "POST",
@@ -89,6 +102,7 @@ function json(body: unknown): RequestInit {
   };
 }
 
+/** Публичное API: документы, вопросы, история. Id всегда строки (как в API). */
 export const api = {
   listDocuments: (limit = 200, offset = 0) =>
     request<DocumentListItem[]>(`/kb/documents?limit=${limit}&offset=${offset}`),
@@ -99,6 +113,7 @@ export const api = {
   createDocument: (title: string, text: string) =>
     request<CreateDocumentResponse>("/kb/documents", json({ title, text })),
   uploadDocument: (file: File, title?: string) => {
+    // multipart: Content-Type с boundary выставит браузер, вручную его не задаём.
     const form = new FormData();
     form.append("file", file);
     if (title) form.append("title", title);
@@ -115,16 +130,20 @@ export const api = {
   getQaRun: (id: string) => request<QaRun>(`/kb/qa_runs/${encodeURIComponent(id)}`),
 };
 
+/** Ключ sessionStorage для админ-токена (живёт только в текущей вкладке). */
 export const ADMIN_TOKEN_KEY = "kb.adminToken";
 
+// Параметры запроса к /admin: заголовок X-Admin-Token и JSON-тело при необходимости.
 function adminInit(token: string, method = "GET", body?: unknown): RequestInit {
   const headers: Record<string, string> = { "X-Admin-Token": token };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   return { method, headers, body: body === undefined ? undefined : JSON.stringify(body) };
 }
 
+// Имя модели может содержать `/` и `:` (например, `qwen2.5:7b`) — кодируем его целиком.
 const modelPath = (name: string) => `/admin/embedding-models/${encodeURIComponent(name)}`;
 
+/** Админ-API: health, реестр моделей эмбеддингов, blue/green-переиндексация и активация. */
 export const adminApi = {
   health: (t: string) => request<HealthReport>("/admin/health", adminInit(t)),
   listModels: (t: string) => request<EmbeddingModel[]>("/admin/embedding-models", adminInit(t)),
@@ -138,10 +157,12 @@ export const adminApi = {
     request<{ deleted: string; embeddings_deleted: number }>(modelPath(name), adminInit(t, "DELETE")),
 };
 
+/** Абсолютная ссылка на скачивание: presigned-URL S3 как есть, относительный путь — от API_URL. */
 export function downloadHref(url: string): string {
   return /^https?:\/\//.test(url) ? url : `${API_URL}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+/** Текст любой ошибки для уведомления. */
 export function errorMessage(e: unknown): string {
   if (e instanceof ApiError || e instanceof NetworkError) return e.message;
   return e instanceof Error ? e.message : String(e);

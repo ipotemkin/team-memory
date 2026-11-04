@@ -1,6 +1,7 @@
-"""Admin API (/admin): embedding-model registry, blue/green reindex, health. Header X-Admin-Token.
+"""Админ-API (/admin): реестр моделей эмбеддингов, blue/green-переиндексация, health. Заголовок
+X-Admin-Token.
 
-Disabled (404) when ADMIN_TOKEN is empty.
+Если ADMIN_TOKEN пуст — API выключен (404), чтобы не светить его существование.
 """
 
 import secrets
@@ -16,9 +17,15 @@ from app.services.health import HealthService
 
 
 def require_admin(request: Request, x_admin_token: str | None = Header(default=None)) -> None:
+    """Зависимость роутера: проверяет X-Admin-Token.
+
+    Raises:
+        ApiError: 404 — админка выключена; 401 — токен неверный или отсутствует.
+    """
     expected: str = request.app.state.container.settings.ADMIN_TOKEN
     if not expected:
         raise ApiError(404, "not_found", "admin API is disabled (ADMIN_TOKEN is not set)")
+    # Сравнение за постоянное время — без утечки токена через тайминг.
     if not x_admin_token or not secrets.compare_digest(x_admin_token.encode(), expected.encode()):
         raise ApiError(401, "unauthorized", "invalid or missing X-Admin-Token")
 
@@ -27,6 +34,11 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 
 
 def _svc(request: Request) -> AdminService:
+    """AdminService из контейнера.
+
+    Raises:
+        ApiError: 503 — реестр моделей недоступен (например, in-memory режим без Postgres).
+    """
     try:
         svc: AdminService = request.app.state.container.admin_service()
     except RuntimeError as e:
@@ -35,19 +47,21 @@ def _svc(request: Request) -> AdminService:
 
 
 async def _audit(request: Request, action: str, inp: dict[str, Any], out: dict[str, Any]) -> None:
-    """Successful admin commands leave an audit row (errors are recorded by AuditMiddleware)."""
+    """Успешные админ-команды оставляют запись аудита (ошибки записывает AuditMiddleware)."""
     await request.app.state.container.audit_service().record(
         AuditRecord(action=action, input=inp, output=out, status="ok", duration_ms=0)
     )
     request.state.audited = True
 
 
+# Тело POST /admin/embedding-models: регистрация новой модели (статус pending).
 class RegisterModel(BaseModel):
     provider: str = Field(min_length=1, max_length=50, examples=["ollama"])
     name: str = Field(min_length=1, max_length=200, examples=["bge-m3"])
     dimension: int = Field(gt=0, le=EMBEDDING_DIM_MAX, examples=[1024])
 
 
+# Состояние модели в реестре; progress — доля переиндексированных фрагментов (0..1).
 class ModelOut(BaseModel):
     name: str
     provider: str
@@ -78,6 +92,7 @@ class ModelOut(BaseModel):
         )
 
 
+# Расширенный health: все зависимости, включая внешние (LLM, эмбеддинги, ClickHouse).
 @router.get("/health")
 async def admin_health(request: Request) -> dict[str, Any]:
     svc: HealthService = request.app.state.admin_health_service
@@ -101,6 +116,7 @@ async def register_model(body: RegisterModel, request: Request) -> ModelOut:
     return out
 
 
+# Запускает фоновую blue/green-переиндексацию; активная модель продолжает обслуживать поиск.
 @router.post("/embedding-models/{name:path}/reindex", status_code=202)
 async def start_reindex(name: str, request: Request) -> dict[str, Any]:
     svc = _svc(request)
@@ -110,6 +126,7 @@ async def start_reindex(name: str, request: Request) -> dict[str, Any]:
     return out
 
 
+# Атомарное переключение активной модели (только для полностью проиндексированной).
 @router.post("/embedding-models/{name:path}/activate")
 async def activate_model(name: str, request: Request) -> ModelOut:
     out = ModelOut.of(await _svc(request).activate(name))

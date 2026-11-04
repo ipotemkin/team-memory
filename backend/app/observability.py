@@ -1,4 +1,7 @@
-"""Structured JSON logging, request-id middleware and optional Prometheus /metrics."""
+"""Наблюдаемость: структурные JSON-логи, middleware X-Request-ID и опциональные Prometheus-метрики /metrics.
+
+request_id хранится в contextvar, поэтому попадает во все логи запроса, в том числе из сервисов.
+"""
 
 import contextvars
 import json
@@ -12,10 +15,13 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
 REQUEST_ID_HEADER = "x-request-id"
+# Стандартные атрибуты LogRecord — всё остальное пришло из ``extra`` и выводится в JSON.
 _STD = set(vars(logging.makeLogRecord({}))) | {"message", "asctime"}
 
 
 class JsonFormatter(logging.Formatter):
+    """Форматтер логов в одну JSON-строку: ts, level, logger, msg, request_id и поля из ``extra``."""
+
     def format(self, record: logging.LogRecord) -> str:
         out: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, UTC).isoformat(timespec="milliseconds"),
@@ -35,12 +41,18 @@ class JsonFormatter(logging.Formatter):
 
 
 class RequestIdFilter(logging.Filter):
+    """Для текстового формата: добавляет ``request_id`` в запись лога."""
+
     def filter(self, record: logging.LogRecord) -> bool:
         record.request_id = request_id_var.get() or "-"
         return True
 
 
 def setup_logging(fmt: str = "json", level: str = "INFO") -> None:
+    """Настраивает корневой логгер (повторный вызов не дублирует обработчик).
+
+    Логи uvicorn перенаправляются в корневой логгер, чтобы формат был единым.
+    """
     root = logging.getLogger()
     for h in list(root.handlers):
         if getattr(h, "_kb", False):
@@ -61,6 +73,8 @@ def setup_logging(fmt: str = "json", level: str = "INFO") -> None:
 
 
 class _Metrics:
+    """Счётчик запросов и гистограмма задержек по методу/шаблону маршрута/статусу (свой registry)."""
+
     def __init__(self) -> None:
         from prometheus_client import CollectorRegistry, Counter, Histogram
 
@@ -73,20 +87,22 @@ class _Metrics:
         )
 
     def render(self) -> tuple[bytes, str]:
+        """Текстовый формат Prometheus и его Content-Type."""
         from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
         return generate_latest(self.registry), CONTENT_TYPE_LATEST
 
 
 def make_metrics() -> _Metrics | None:
+    """Метрики, если установлен prometheus-client, иначе None."""
     try:
         return _Metrics()
-    except ImportError:  # prometheus-client is optional
+    except ImportError:  # prometheus-client — необязательная зависимость
         return None
 
 
 class RequestContextMiddleware:
-    """Pure ASGI: X-Request-ID (incoming or generated), access log line, optional metrics."""
+    """Чистый ASGI: X-Request-ID (входящий или сгенерированный), строка access-лога, опциональные метрики."""
 
     def __init__(self, app: ASGIApp, metrics: _Metrics | None = None) -> None:
         self.app = app
@@ -98,6 +114,7 @@ class RequestContextMiddleware:
             await self.app(scope, receive, send)
             return
         headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+        # Входящий id обрезается до 100 символов (защита логов); state["request_id"] читает аудит.
         rid = headers.get(REQUEST_ID_HEADER, "")[:100] or uuid.uuid4().hex
         token = request_id_var.set(rid)
         scope.setdefault("state", {})["request_id"] = rid
@@ -114,6 +131,7 @@ class RequestContextMiddleware:
             await self.app(scope, receive, snd)
         finally:
             dt = time.perf_counter() - t0
+            # Метки по шаблону маршрута, а не пути: иначе кардинальность метрик растёт с каждым id.
             route = getattr(scope.get("route"), "path", None) or "unmatched"
             if self.metrics is not None and scope["path"] != "/metrics":
                 self.metrics.requests.labels(scope["method"], route, str(status["code"])).inc()

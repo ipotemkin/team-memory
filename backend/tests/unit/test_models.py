@@ -1,3 +1,5 @@
+"""Доменные модели: ограничения длины, пагинация, строгость схемы AiAnswer."""
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 

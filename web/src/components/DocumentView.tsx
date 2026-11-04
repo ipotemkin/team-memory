@@ -1,3 +1,4 @@
+// Карточка документа (боковая панель): метаданные, превью текста, ссылка на оригинал.
 import { useEffect, useState } from "react";
 import { api, downloadHref, errorMessage } from "../api/client";
 import type { DocumentDetail } from "../api/types";
@@ -5,14 +6,17 @@ import { formatDate } from "../format";
 import { StatusBadge } from "./Badges";
 import { Modal } from "./Modal";
 
+/** Сколько строк текста грузить в превью (параметр ?lines=); «Показать всё» загружает весь текст. */
 export const PREVIEW_LINES = 50;
 
+/** Карточка документа по id. */
 export function DocumentView({ id, onClose }: { id: string; onClose: () => void }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [all, setAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Игнорируем ответ, пришедший после закрытия карточки или смены документа.
     let alive = true;
     setError(null);
     api

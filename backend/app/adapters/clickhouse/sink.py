@@ -1,7 +1,8 @@
-"""ClickHouse AuditSink.
+"""AuditSink для ClickHouse — аналитическое хранилище аудита (AUDIT_BACKEND=clickhouse|both).
 
-clickhouse-connect is synchronous; calls run in a worker thread (asyncio.to_thread).
-The client is created lazily so the API starts even if ClickHouse is down (fan_out swallows errors).
+clickhouse-connect синхронный: вызовы выполняются в потоке (``asyncio.to_thread``). Клиент создаётся
+лениво, чтобы API стартовал даже при недоступном ClickHouse (``fan_out`` глотает ошибки записи).
+Таблица — MergeTree с месячными партициями и TTL 365 дней.
 """
 
 import asyncio
@@ -13,6 +14,7 @@ from typing import Any
 from app.domain.health import ComponentStatus
 from app.domain.models import AuditRecord
 
+# Допустимый идентификатор ClickHouse (защита от SQL-инъекции через настройки).
 _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 DDL = """
@@ -37,12 +39,25 @@ COLUMNS = ["created_at", "request_id", "action", "status", "error", "duration_ms
 
 
 def _ident(v: str) -> str:
+    """Проверяет имя базы/таблицы (оно подставляется в SQL как идентификатор, параметром его не передать).
+
+    Raises:
+        ValueError: недопустимые символы.
+    """
     if not _IDENT.match(v):
         raise ValueError(f"bad ClickHouse identifier: {v!r}")
     return v
 
 
 class ClickHouseAuditSink:
+    """Порт AuditSink для ClickHouse.
+
+    Args:
+        host, port, username, password, secure: подключение по HTTP(S).
+        database, table: куда писать (проверяются как идентификаторы).
+        client: готовый клиент (для тестов).
+    """
+
     def __init__(
         self,
         host: str,
@@ -63,6 +78,7 @@ class ClickHouseAuditSink:
         self._lock = threading.Lock()
 
     def _get(self) -> Any:
+        """Ленивое создание клиента; lock — запись может идти из нескольких потоков."""
         with self._lock:
             if self._client is None:
                 import clickhouse_connect
@@ -72,6 +88,7 @@ class ClickHouseAuditSink:
 
     @property
     def fqtn(self) -> str:
+        """Полное имя таблицы ``база.таблица``."""
         return f"{self.database}.{self.table}"
 
     def _ensure_schema(self) -> None:
@@ -80,10 +97,12 @@ class ClickHouseAuditSink:
         c.command(DDL.format(db=self.database, table=self.table))
 
     async def ensure_schema(self) -> None:
+        """Создаёт базу и таблицу, если их нет."""
         await asyncio.to_thread(self._ensure_schema)
 
     @staticmethod
     def row(rec: AuditRecord) -> list[Any]:
+        """Запись аудита → строка таблицы (input/output сериализуются в JSON-строки)."""
         return [
             rec.created_at,
             rec.request_id,
@@ -105,14 +124,17 @@ class ClickHouseAuditSink:
         q = f"SELECT count() FROM {self.fqtn}"
         params: dict[str, Any] = {}
         if action is not None:
+            # Серверный параметр ClickHouse {имя:Тип} — значение не подставляется в строку SQL.
             q += " WHERE action = {a:String}"
             params["a"] = action
         return int(self._get().query(q, parameters=params).result_rows[0][0])
 
     async def count(self, action: str | None = None) -> int:
+        """Число записей (опционально по действию) — для тестов и проверки."""
         return await asyncio.to_thread(self._count, action)
 
     def close(self) -> None:
+        """Закрывает клиент (следующий вызов создаст новый)."""
         with self._lock:
             if self._client is not None:
                 self._client.close()
@@ -123,6 +145,8 @@ class ClickHouseAuditSink:
 
 
 class ClickHouseProbe:
+    """Порт HealthProbe: ``ping`` клиента ClickHouse."""
+
     name = "clickhouse"
 
     def __init__(self, sink: ClickHouseAuditSink) -> None:

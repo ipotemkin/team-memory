@@ -1,4 +1,8 @@
-"""SQLAlchemy 2.0 ORM models (persistence shape; not domain models)."""
+"""ORM-модели SQLAlchemy 2.0 — форма хранения, а не доменные модели.
+
+Таблицы создаются миграциями Alembic (``backend/migrations``), а не ``metadata.create_all``.
+Документы и qa_runs — ORM-классы; фрагменты и эмбеддинги — Core-таблицы для массовых вставок.
+"""
 
 from datetime import datetime
 from typing import Any
@@ -13,13 +17,18 @@ from sqlalchemy.types import UserDefinedType
 SCHEMA = "app"
 metadata = MetaData(schema=SCHEMA)
 
+# Postgres-enum статусов документа; create_type=False — тип создаёт миграция.
 DOCUMENT_STATUS = ENUM(
     "uploaded", "indexing", "ready", "failed", name="document_status", schema=SCHEMA, create_type=False
 )
 
 
 class Vector(UserDefinedType[list[float]]):
-    """pgvector `vector` without fixed dimension (values bound as text and cast in SQL)."""
+    """Тип pgvector ``vector`` без фиксированной размерности.
+
+    Значения передаются текстом и приводятся в SQL (``CAST(... AS vector)``); размерность у каждой модели
+    своя и проверяется через частичный индекс ``embedding::vector(dim)``.
+    """
 
     cache_ok = True
 
@@ -28,10 +37,14 @@ class Vector(UserDefinedType[list[float]]):
 
 
 class Base(DeclarativeBase):
+    """Базовый декларативный класс со схемой ``app``."""
+
     metadata = metadata
 
 
 class DocumentRow(Base):
+    """Таблица app.documents."""
+
     __tablename__ = "documents"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -52,6 +65,8 @@ class DocumentRow(Base):
 
 
 class QaRunRow(Base):
+    """Таблица app.qa_runs (история вопросов и ответов)."""
+
     __tablename__ = "qa_runs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -68,6 +83,8 @@ class QaRunRow(Base):
 
 
 class AuditRunRow(Base):
+    """Таблица app.audit_runs, партиционированная по месяцам created_at (поэтому created_at входит в PK)."""
+
     __tablename__ = "audit_runs"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
@@ -80,7 +97,8 @@ class AuditRunRow(Base):
     request_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True))
 
 
-# Core tables (bulk paths)
+# Core-таблицы (массовые вставки и выборки)
+# tsv — tsvector('russian'), генерируемая колонка в БД (см. миграцию 0002).
 snippets = Table(
     "snippets",
     metadata,
@@ -95,6 +113,8 @@ snippets = Table(
     Column("tsv", TSVECTOR),
 )
 
+# Эмбеддинги: PK (snippet_id, embedding_model) — у фрагмента по вектору на каждую модель.
+# text_sha256 фиксирует версию текста: при изменении фрагмента вектор считается устаревшим.
 snippet_embeddings = Table(
     "snippet_embeddings",
     metadata,

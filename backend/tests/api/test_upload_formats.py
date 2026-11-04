@@ -1,4 +1,6 @@
-"""DOCX / PDF upload end-to-end (memory + stub): extract -> original in storage -> index -> ask."""
+"""Загрузка DOCX / PDF сквозь систему (memory + stub): извлечение → оригинал в хранилище → индексация →
+ответ.
+"""
 
 from collections.abc import Callable
 

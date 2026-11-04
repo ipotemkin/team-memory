@@ -1,3 +1,5 @@
+"""Общие фикстуры: датасет базы знаний и герметичные настройки (окружение и .env не влияют на тесты)."""
+
 import json
 from pathlib import Path
 from typing import Any

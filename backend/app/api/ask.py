@@ -1,4 +1,6 @@
-"""/kb/ask — always 200; problems end up as needs_review=true with a reason in qa_runs/audit."""
+"""/kb/ask — RAG-ответ по базе знаний. Всегда 200: проблемы (нет фрагментов, ошибка/отказ LLM, цитата
+не найдена) превращаются в needs_review=true с причиной в qa_runs и аудите.
+"""
 
 from typing import Annotated
 

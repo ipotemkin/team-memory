@@ -1,4 +1,7 @@
-"""TaskQueue backed by Celery (send_task by name; workers register the handlers)."""
+"""TaskQueue на Celery: задача отправляется по имени (``send_task``), обработчики регистрирует воркер.
+
+API не импортирует код задач — только имя, поэтому процесс API не тянет зависимости воркера.
+"""
 
 import asyncio
 from typing import Any
@@ -7,6 +10,8 @@ from celery import Celery
 
 
 class CeleryTaskQueue:
+    """Порт TaskQueue; ``send_task`` синхронный (сеть до Redis), поэтому вызывается в потоке."""
+
     def __init__(self, app: Celery) -> None:
         self._app = app
 

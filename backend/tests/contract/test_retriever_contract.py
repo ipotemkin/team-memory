@@ -1,3 +1,5 @@
+"""Контракт Retriever: ранжирование, нормированный score, нет совпадений, только ready-документы."""
+
 from app.domain.models import DocumentStatus
 from tests.contract.conftest import Backend
 from tests.contract.helpers import new_doc, snip

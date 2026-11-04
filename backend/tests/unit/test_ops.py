@@ -1,4 +1,4 @@
-"""Stage 8 ops: settings for Ollama/ClickHouse, JSON logging, ClickHouse sink with a fake client."""
+"""Эксплуатация (этап 8): настройки Ollama/ClickHouse, JSON-логи, sink ClickHouse с фейковым клиентом."""
 
 import json
 import logging

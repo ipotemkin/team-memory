@@ -1,4 +1,4 @@
-// Типы вручную по схемам backend/app/api/schemas.py.
+// Типы вручную по схемам backend/app/api/schemas.py (DTO HTTP API). Все id — строки, даты — ISO 8601.
 export type DocumentStatus = "indexing" | "ready" | "failed";
 
 export interface DocumentListItem {
@@ -37,6 +37,7 @@ export interface AskResponse {
   needs_review: boolean;
 }
 
+/** Причина ручной проверки (qa_runs.error); тексты — в format.ts. */
 export type ReviewReason =
   | "no_sources"
   | "low_confidence"
@@ -68,6 +69,7 @@ export interface ErrorBody {
   detail?: unknown;
 }
 
+/** Клиентские лимиты валидации — те же, что в домене бэкенда (Title, Text, Question, MAX_UPLOAD_MB). */
 export const LIMITS = {
   titleMax: 200,
   textMax: 100_000,
@@ -77,6 +79,7 @@ export const LIMITS = {
   uploadExtensions: [".txt", ".md", ".docx", ".pdf"],
 } as const;
 
+/** Модель из реестра эмбеддингов (/admin); progress — доля переиндексированных фрагментов 0..1. */
 export interface EmbeddingModel {
   name: string;
   provider: string;
@@ -91,6 +94,7 @@ export interface EmbeddingModel {
   error: string | null;
 }
 
+/** Ответ /admin/health: общий статус и состояние каждой зависимости. */
 export interface HealthReport {
   status: "ok" | "degraded";
   components: Record<string, { ok: boolean; detail: string }>;

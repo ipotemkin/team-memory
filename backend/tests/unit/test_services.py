@@ -1,4 +1,4 @@
-"""Service-level scenarios (spec): documents listed; answerable → sources; otherwise needs_review."""
+"""Сценарии на уровне сервисов (ТЗ): документы в списке; есть ответ → источники; иначе needs_review."""
 
 from typing import Any
 

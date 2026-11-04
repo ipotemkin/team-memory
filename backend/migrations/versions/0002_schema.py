@@ -1,4 +1,6 @@
-"""full app schema: documents, snippets, embeddings registry, qa_runs, audit_runs
+"""Полная схема приложения: documents, snippets, реестр эмбеддингов, qa_runs, audit_runs.
+
+SQL целиком в UPGRADE/DOWNGRADE (CHECK-инварианты, партиции аудита, функции HNSW-индекса и партиций).
 
 Revision ID: 0002
 Revises: 0001
@@ -177,7 +179,11 @@ DROP TYPE IF EXISTS app.document_status;
 
 
 def _statements(script: str) -> list[str]:
-    """Split on ';' at line end, ignoring dollar-quoted bodies (asyncpg runs one statement at a time)."""
+    """Делит скрипт по ';' в конце строки, не разрывая тела в $$...$$ (asyncpg выполняет по одному
+    оператору).
+
+    Строки-комментарии ``--`` вне тел функций отбрасываются.
+    """
     out: list[str] = []
     buf: list[str] = []
     in_body = False

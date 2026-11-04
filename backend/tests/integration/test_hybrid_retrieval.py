@@ -1,4 +1,4 @@
-"""Hybrid retrieval on real Postgres + pgvector: FTS ∪ vector (active model, ready docs), RRF, scores."""
+"""Гибридный поиск на Postgres + pgvector: FTS ∪ вектор (активная модель, ready-документы), RRF, score."""
 
 from collections.abc import AsyncIterator
 

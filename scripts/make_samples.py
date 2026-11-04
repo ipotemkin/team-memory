@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Regenerate the sample .docx/.pdf (tests_data/samples and backend/tests/fixtures).
+"""Пересоздаёт образцы .docx/.pdf (tests_data/samples и backend/tests/fixtures).
 
     cd backend && uv run python ../scripts/make_samples.py [--font /path/DejaVuSans.ttf]
 
-Needs python-docx (runtime dep) and fpdf2 (dev dep). The PDF embeds a subset of a Unicode TTF
-(DejaVu Sans by default) so the text layer has proper Cyrillic (ToUnicode map).
+Нужны python-docx (зависимость приложения) и fpdf2 (dev-зависимость). В PDF встраивается подмножество
+Unicode-шрифта TTF (по умолчанию DejaVu Sans), чтобы текстовый слой содержал корректную кириллицу
+(карта ToUnicode).
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ TABLE = [("Приоритет", "Время реакции"), ("P1", "15 мин�
 
 
 def make_docx(path: Path) -> None:
+    """DOCX-образец: заголовок документа, разделы с заголовками и абзацами."""
     from docx import Document
 
     doc = Document()
@@ -59,17 +61,18 @@ def make_docx(path: Path) -> None:
 
 
 def make_pdf(path: Path, font: Path) -> None:
+    """PDF-образец с тем же текстом на двух страницах."""
     from fpdf import FPDF
 
     pdf = FPDF()
-    pdf.set_creation_date(datetime(2026, 1, 1, tzinfo=UTC))  # reproducible bytes
+    pdf.set_creation_date(datetime(2026, 1, 1, tzinfo=UTC))  # воспроизводимые байты файла
     pdf.add_font("DejaVu", "", str(font))
     pdf.set_font("DejaVu", size=12)
     pdf.add_page()
     pdf.multi_cell(0, 8, TITLE, new_x="LMARGIN", new_y="NEXT")
     for i, (head, paras) in enumerate(SECTIONS):
         if i == 2:
-            pdf.add_page()  # second page: page break must survive extraction
+            pdf.add_page()  # вторая страница: разрыв страницы должен пережить извлечение
         pdf.ln(4)
         pdf.multi_cell(0, 8, head, new_x="LMARGIN", new_y="NEXT")
         for p in paras:
@@ -78,6 +81,7 @@ def make_pdf(path: Path, font: Path) -> None:
 
 
 def main() -> None:
+    """Пишет образцы в tests_data/samples и копирует их в фикстуры тестов."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--font", default="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
     a = ap.parse_args()

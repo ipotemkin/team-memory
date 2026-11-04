@@ -1,4 +1,4 @@
-"""Celery wiring: task names, retries, beat schedule; tasks executed via the worker's own loop."""
+"""Celery: имена задач, ретраи, расписание beat; задачи выполняются на собственном event loop воркера."""
 
 from typing import Any
 

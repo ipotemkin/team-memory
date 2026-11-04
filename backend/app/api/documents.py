@@ -1,4 +1,8 @@
-"""/kb/documents: JSON {title,text} per spec, or multipart file upload (extension)."""
+"""/kb/documents: JSON {title, text} по ТЗ или multipart-загрузка файла (формат по
+расширению/MIME/сигнатуре).
+
+``document_id`` в API — строка (ТЗ), внутри — BIGINT; см. ``ids.py``.
+"""
 
 import json
 from typing import Annotated, Any
@@ -15,6 +19,7 @@ from app.services.documents import DocumentService
 
 router = APIRouter(prefix="/kb/documents", tags=["documents"])
 
+# Ручное описание тела для OpenAPI: эндпоинт принимает два типа контента, FastAPI сам этого не выведет.
 _BODY_DOC: dict[str, Any] = {
     "requestBody": {
         "required": True,
@@ -39,6 +44,7 @@ _BODY_DOC: dict[str, Any] = {
 }
 
 
+# Тело читаем вручную по Content-Type, чтобы один эндпоинт принимал и JSON, и multipart.
 @router.post(
     "",
     response_model=DocumentCreated,
@@ -59,7 +65,7 @@ async def create_document(
             raise ApiError(400, "bad_request", "Invalid JSON body") from None
         if not isinstance(payload, dict):
             raise ApiError(400, "bad_request", "JSON object expected")
-        body = DocumentIn.model_validate(payload)  # ValidationError -> 422
+        body = DocumentIn.model_validate(payload)  # ValidationError → 422
         doc = await svc.add(body.title, body.text)
     elif ctype == "multipart/form-data":
         doc = await _upload(request, svc, s)
@@ -70,8 +76,17 @@ async def create_document(
 
 
 async def _upload(request: Request, svc: DocumentService, s: Settings) -> Any:
+    """Разбирает multipart-загрузку и передаёт файл в ``DocumentService.add_file``.
+
+    Заголовок title необязателен — по умолчанию имя файла без расширения.
+
+    Raises:
+        ApiError: 413 — файл больше MAX_UPLOAD_MB; 422 — нет поля file.
+    """
     limit = s.MAX_UPLOAD_MB * 1024 * 1024
     declared = int(request.headers.get("content-length") or 0)
+    # Ранний отказ по Content-Length (запас 64 КБ на multipart-обвязку), чтобы не читать огромное тело;
+    # фактический размер файла проверяется ниже.
     if declared > limit + 64 * 1024:
         raise ApiError(413, "file_too_large", f"max {s.MAX_UPLOAD_MB} MB")
     form = await request.form(max_files=1, max_fields=5)
@@ -84,7 +99,7 @@ async def _upload(request: Request, svc: DocumentService, s: Settings) -> Any:
     filename = file.filename or "file"
     raw_title = form.get("title")
     title = raw_title if isinstance(raw_title, str) and raw_title.strip() else filename.rsplit(".", 1)[0]
-    # format detection, magic bytes and text extraction: TextExtractionService (415 / 422)
+    # определение формата, magic bytes и извлечение текста — в TextExtractionService (415 / 422)
     return await svc.add_file(title, filename, data, file.content_type)
 
 
@@ -108,6 +123,7 @@ async def get_document(
     document_id: str,
     svc: Annotated[DocumentService, Depends(deps.documents)],
     s: Annotated[Settings, Depends(deps.settings)],
+    # lines — вернуть только первые N строк текста (просмотр больших документов).
     lines: Annotated[int | None, Query(ge=1, le=100_000, description="вернуть только первые N строк")] = None,
 ) -> DocumentDetail:
     doc = await svc.get(parse_id(document_id, "document"))
